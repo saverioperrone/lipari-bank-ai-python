@@ -22,4 +22,4 @@ class Settings(BaseSettings):
     jwt_secret: str
 
 
-settings = Settings()  # type: ignore[call-arg]  # values come from env/.env at runtime
+settings = Settings()  # raise at import if missing required
