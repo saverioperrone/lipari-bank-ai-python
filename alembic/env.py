@@ -7,6 +7,10 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from src.config import settings
+
+# import necessario, non inutile: registra i modelli su Base.metadata,
+# altrimenti --autogenerate non vede nessuna tabella
+from src.db import models  # noqa: F401
 from src.db.session import Base
 
 config = context.config
