@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     default_model: str = "gpt-4o-mini"
     embedding_model: str = "text-embedding-3-small"
     max_tokens_per_request: int = 2000
+    max_eur_per_day: float = 5.0
     jwt_secret: str
 
 
