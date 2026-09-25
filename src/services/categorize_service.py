@@ -21,12 +21,18 @@ Reasoning: 1-2 frasi spiegando la scelta.
 """
 
 
-client = instructor.from_openai(AsyncOpenAI(api_key=settings.openai_api_key))
+# Ollama espone un endpoint compatibile OpenAI, ma non supporta il tool calling
+# che Instructor usa di default: Mode.JSON gli fa chiedere direttamente un JSON
+# conforme allo schema di CategorizeResponse.
+client = instructor.from_openai(
+    AsyncOpenAI(api_key="ollama", base_url=settings.ollama_base_url),
+    mode=instructor.Mode.JSON,
+)
 
 
 async def categorize(req: CategorizeRequest) -> CategorizeResponse:
     return await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.default_model,
         response_model=CategorizeResponse,
         messages=[
             {"role": "system", "content": CATEGORIZE_SYSTEM},
