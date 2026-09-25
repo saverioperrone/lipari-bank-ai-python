@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     openai_api_key: str
     anthropic_api_key: str
     default_model: str = "gpt-4o-mini"
+    ollama_base_url: str = "http://localhost:11434/v1"
     embedding_model: str = "text-embedding-3-small"
     max_tokens_per_request: int = 2000
     max_eur_per_day: float = 5.0
