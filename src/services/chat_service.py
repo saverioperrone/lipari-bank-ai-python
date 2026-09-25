@@ -84,7 +84,7 @@ class ChatService:
         # (il blocco 4.3 della consegna dichiara il solo `complete`).
         # Funziona quindi solo con un modello OpenAI selezionato.
         stream = await self.llm.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=self.llm.model,
             messages=[m.model_dump() for m in messages],
             stream=True,
             max_tokens=500,
