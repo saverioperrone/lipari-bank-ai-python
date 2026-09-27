@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import RequestResponseEndpoint
 
-from src.api import categorize, chat
+from src.api import advice, categorize, chat
 from src.config import settings
 from src.exceptions import AppError
 
@@ -101,3 +101,4 @@ async def health() -> HealthResponse:
 
 app.include_router(chat.router)
 app.include_router(categorize.router)
+app.include_router(advice.router)
