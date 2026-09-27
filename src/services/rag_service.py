@@ -1,5 +1,6 @@
 import re
 
+from src.lib.dedup import senza_ripetizioni
 from src.llm.client import LLMProvider
 from src.llm.embedding_client import EmbeddingClient
 from src.llm.types import Message
@@ -8,7 +9,8 @@ from src.types.advice import AdviceRequest, AdviceResponse, Citation
 
 RIFIUTO = "Non ho trovato informazioni sufficienti nei documenti disponibili."
 
-PASSAGGI = 5   # quanti passaggi finiscono nel contesto
+PASSAGGI = 5              # quanti passaggi finiscono nel contesto
+CANDIDATI = PASSAGGI * 3  # quanti se ne chiedono, per poterne scartare i ripetuti
 
 MARCATORE = re.compile(r"\[fonte-(\d+)\]")
 
@@ -53,7 +55,8 @@ class RAGService:
         e nessuna citazione: non chiama il modello.
         """
         vettore = await self.embedder.embed_one(req.question)
-        passaggi = await self.retrieval.search(vettore, top_k=PASSAGGI)
+        candidati = await self.retrieval.search(vettore, top_k=CANDIDATI)
+        passaggi = senza_ripetizioni(candidati, PASSAGGI, testo=lambda p: p.content)
         if not passaggi:
             return AdviceResponse(answer=RIFIUTO, citations=[], tokens_used=0, cost_eur=0.0)
 
