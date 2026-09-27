@@ -9,3 +9,5 @@ wheels/
 # Virtual environments
 .venv
 .env
+# Misure rigenerabili con scripts/eval_retrieval.py
+docs/eval/
