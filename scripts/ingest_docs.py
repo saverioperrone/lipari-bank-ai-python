@@ -1,6 +1,6 @@
-"""Carica corpus/*.md nell'indice passando dall'endpoint HTTP.
+"""Carica data/docs/*.md nell'indice passando dall'endpoint HTTP.
 
-    uv run python -m scripts.ingest_corpus
+    uv run python -m scripts.ingest_docs
 
 Passa dall'endpoint e non dal servizio di proposito: quello che si vuole dimostrare
 e' la pipeline che usera' il consulente, non una scorciatoia che salta il router.
@@ -12,22 +12,30 @@ from pathlib import Path
 
 import httpx
 
-CORPUS = Path(__file__).parent.parent / "corpus"
+DOCS = Path(__file__).parent.parent / "data" / "docs"
 URL = "http://127.0.0.1:8000/api/ai/documents/ingest"
+
+# L'ingestione e' lenta per costruzione: un documento intero sono decine di embedding in
+# sequenza. Con il modello locale su CPU i 60 secondi del corso non bastano sempre.
+TIMEOUT = 300.0
 
 
 async def main() -> None:
-    # L'ingestione e' lenta per costruzione: un documento intero sono decine di
-    # embedding in sequenza. Il timeout generoso e' la nota della lezione, non un cerotto.
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        for doc in sorted(CORPUS.glob("*.md")):
-            r = await client.post(
+    percorsi = await asyncio.to_thread(lambda: sorted(DOCS.glob("*.md")))
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        for path in percorsi:
+            # leggere un file e' bloccante: dentro una coroutine si sposta su un thread
+            content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+            response = await client.post(
                 URL,
-                json={"document_id": doc.stem, "content": doc.read_text(encoding="utf-8")},
+                json={
+                    "document_id": path.stem,
+                    "content": content,
+                    "metadata": {"source": str(path), "title": path.stem.replace("-", " ")},
+                },
             )
-            r.raise_for_status()
-            body = r.json()
-            print(f"{doc.stem:42} {body['chunk_count']:3} passaggi  dim {body['embedding_dim']}")
+            response.raise_for_status()
+            print(f"{path.name}: {response.json()}")
 
 
 if __name__ == "__main__":

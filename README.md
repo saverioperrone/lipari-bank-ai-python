@@ -82,7 +82,7 @@ docker exec ollama ollama pull llama3.2:3b
 docker exec ollama ollama pull nomic-embed-text
 uv run alembic upgrade head
 uv run uvicorn src.main:app --reload       # in un altro terminale
-uv run python -m scripts.ingest_corpus     # carica le quattro circolari di corpus/
+uv run python -m scripts.ingest_docs       # carica le quattro circolari di data/docs/
 uv run python -m scripts.eval_retrieval --etichetta baseline           # solo vettoriale
 uv run python -m scripts.eval_retrieval --etichetta ibrida --ibrida    # con la lessicale
 uv run python -m scripts.eval_retrieval --etichetta deduplica --dedup  # il controllo
