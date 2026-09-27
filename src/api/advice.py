@@ -31,5 +31,7 @@ async def advice(req: AdviceRequest, db: AsyncSession = Depends(get_db)) -> Advi
 @router.post("/documents/ingest", response_model=IngestResponse)
 async def ingest(req: IngestRequest, db: AsyncSession = Depends(get_db)) -> IngestResponse:
     """Scrive l'indice. Lento per costruzione: un documento lungo supera i timeout."""
-    quanti = await IngestService(db, EmbeddingClient()).ingest(req.document_id, req.content)
+    quanti = await IngestService(db, EmbeddingClient()).ingest(
+        req.document_id, req.content, req.metadata
+    )
     return IngestResponse(chunk_count=quanti, embedding_dim=EMBEDDING_DIM)

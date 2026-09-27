@@ -15,7 +15,9 @@ class IngestService:
         self.session = session
         self.embedder = embedder
 
-    async def ingest(self, document_id: str, text: str) -> int:
+    async def ingest(
+        self, document_id: str, text: str, metadata: dict[str, str] | None = None
+    ) -> int:
         """Taglia, vettorizza e salva. Ritorna quanti passaggi sono stati scritti.
 
         Ri-ingerire lo stesso `document_id` sostituisce: i passaggi precedenti vengono
@@ -39,6 +41,7 @@ class IngestService:
                     chunk_index=inizio + i,
                     content=testo,
                     embedding=vettore,
+                    chunk_metadata=metadata or {},
                 )
                 for i, (testo, vettore) in enumerate(zip(lotto, vettori, strict=True))
             ])
