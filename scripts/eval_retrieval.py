@@ -1,6 +1,7 @@
 """La misura: quante volte il recupero porta il documento giusto fra i primi cinque.
 
     uv run python -m scripts.eval_retrieval --etichetta baseline
+    uv run python -m scripts.eval_retrieval --etichetta ibrida --ibrida
 
 Chiama il recupero, non `/advice`: il numero da misurare e' del retrieval, e passare
 dalla generazione ci metterebbe dentro la latenza del modello e la sua variabilita'
@@ -20,6 +21,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from src.db.session import AsyncSessionLocal
+from src.lib.dedup import senza_ripetizioni
 from src.llm.embedding_client import EmbeddingClient
 from src.services.retrieval_service import SOGLIA_PREDEFINITA, RetrievalService
 
@@ -103,6 +105,7 @@ class Misura(BaseModel):
     quando: str
     top_k: int
     soglia: float
+    ricerca: str
     hit_at_k: int
     hit_at_1: int
     vuoti: int
@@ -113,6 +116,15 @@ class Misura(BaseModel):
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--etichetta", default="baseline", help="nome della misura")
+    parser.add_argument(
+        "--ibrida", action="store_true", help="affianca la ricerca lessicale e fonde i ranghi"
+    )
+    parser.add_argument(
+        "--dedup",
+        action="store_true",
+        help="solo vettoriale, ma scartando i passaggi ripetuti: serve a separare"
+        " quanto del guadagno viene dalla deduplica e quanto dalla ricerca lessicale",
+    )
     args = parser.parse_args()
 
     embedder = EmbeddingClient()
@@ -122,7 +134,17 @@ async def main() -> None:
         retrieval = RetrievalService(session, embedder)
         for d in DOMANDE:
             vettore = await embedder.embed_one(d.testo)
-            passaggi = await retrieval.search(vettore, top_k=PRIMI, soglia=SOGLIA_PREDEFINITA)
+            if args.ibrida:
+                passaggi = await retrieval.search_ibrida(
+                    d.testo, vettore, top_k=PRIMI, soglia=SOGLIA_PREDEFINITA
+                )
+            elif args.dedup:
+                candidati = await retrieval.search(
+                    vettore, top_k=PRIMI * 3, soglia=SOGLIA_PREDEFINITA
+                )
+                passaggi = senza_ripetizioni(candidati, PRIMI, testo=lambda p: p.content)
+            else:
+                passaggi = await retrieval.search(vettore, top_k=PRIMI, soglia=SOGLIA_PREDEFINITA)
             documenti = [p.document_id for p in passaggi]
             esiti.append(
                 Esito(
@@ -141,6 +163,10 @@ async def main() -> None:
         quando=datetime.now(UTC).isoformat(),
         top_k=PRIMI,
         soglia=SOGLIA_PREDEFINITA,
+        ricerca=(
+            'ibrida' if args.ibrida else 'vettoriale + deduplica' if args.dedup
+            else 'solo vettoriale'
+        ),
         hit_at_k=sum(1 for e in esiti if e.hit_k),
         hit_at_1=sum(1 for e in esiti if e.hit_1),
         vuoti=sum(1 for e in esiti if e.vuoto),
