@@ -1,10 +1,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.db.session import Base
+
+# Dimensione dei vettori prodotti dal modello di embedding in uso.
+# nomic-embed-text ne produce 768; text-embedding-3-small di OpenAI 1536.
+# Cambiare modello di embedding significa rifare l'indice da zero: i vettori
+# di due modelli diversi non sono confrontabili fra loro.
+EMBEDDING_DIM = 768
 
 
 def gen_uuid() -> str:
@@ -42,3 +49,21 @@ class ChatMessage(Base):
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+
+class DocumentChunk(Base):
+    """Un passaggio di un documento, con il suo vettore.
+
+    `document_id` e `chunk_index` servono a comporre le citazioni: senza sapere
+    da quale documento viene un passaggio non si puo' dire all'utente dove
+    verificare.
+    """
+
+    __tablename__ = "document_chunks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    document_id: Mapped[str] = mapped_column(String, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    chunk_metadata: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
