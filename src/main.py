@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import RequestResponseEndpoint
 
-from src.api import advice, auth, categorize, chat
+from src.api import advice, agent, auth, categorize, chat
 from src.config import settings
 from src.exceptions import AppError
 
@@ -104,6 +104,7 @@ app.include_router(chat.router)
 app.include_router(categorize.router)
 app.include_router(advice.router)
 app.include_router(auth.router)
+app.include_router(agent.router)
 
 app.state.limiter = advice.limiter  # slowapi lo cerca qui
 

@@ -1,4 +1,7 @@
+from openai import AsyncOpenAI
+
 from src.config import settings
+from src.exceptions import AppError
 from src.llm.anthropic_provider import AnthropicProvider
 from src.llm.client import LLMProvider
 from src.llm.embedding_client import EmbeddingClient
@@ -31,3 +34,26 @@ embedding_client = EmbeddingClient()
 
 def get_embedder() -> EmbeddingClient:
     return embedding_client  # istanza unica di applicazione
+
+
+def _client_dell_agente() -> AsyncOpenAI | None:
+    """L'SDK di OpenAI per il modello in uso, con la stessa regola di `build_llm_provider`.
+
+    Un modello locale parla con Ollama, che espone la stessa API: cambia solo l'indirizzo,
+    e la chiave non serve. Gli altri parlano con OpenAI, e senza chiave il client non c'è.
+    """
+    if settings.default_model.startswith(OLLAMA_PREFIXES):
+        return AsyncOpenAI(api_key="ollama", base_url=settings.ollama_base_url)
+    if not settings.openai_api_key:
+        return None
+    return AsyncOpenAI(api_key=settings.openai_api_key)
+
+
+openai_client = _client_dell_agente()
+
+
+def get_openai() -> AsyncOpenAI:
+    """Il client dell'agente: uno per processo, come l'embedder."""
+    if openai_client is None:
+        raise AppError(503, "API_KEY_MISSING", "Manca OPENAI_API_KEY: l'agente non può partire")
+    return openai_client
