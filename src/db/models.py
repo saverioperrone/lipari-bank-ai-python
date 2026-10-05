@@ -1,8 +1,20 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Computed, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Computed,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -101,3 +113,30 @@ class DocumentChunk(Base):
     visibility: Mapped[str] = mapped_column(
         String(32), default="public", server_default="public", index=True
     )
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)  # il codice cliente
+    full_name: Mapped[str] = mapped_column(String(120))
+    operator: Mapped[str] = mapped_column(String(64), index=True)  # chi lo ha in portafoglio
+
+
+class Account(Base):
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(String(34), primary_key=True)  # l'IBAN
+    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id"), index=True)
+    label: Mapped[str] = mapped_column(String(64))  # "principale", "risparmio"
+    balance: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+
+
+class Movement(Base):
+    __tablename__ = "movements"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    account_id: Mapped[str] = mapped_column(ForeignKey("accounts.id"), index=True)
+    booking_date: Mapped[date] = mapped_column(Date)  # la data contabile
+    description: Mapped[str] = mapped_column(String(200))
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))  # negativo = uscita
