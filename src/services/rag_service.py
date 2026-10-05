@@ -17,7 +17,13 @@ from src.types.advice import AdviceResponse, Citation
 
 logger = logging.getLogger(__name__)
 
-RIFIUTO = "Non ho trovato informazioni sufficienti nei documenti disponibili."
+# La prima frase resta quella del Giorno 5, che il chiamante riconosce; la seconda dice
+# cosa fare (prompting clinic G6, esercizio 2). E' la stessa frase che chiede il prompt v2.
+RIFIUTO = (
+    "Non ho trovato informazioni sufficienti nei documenti disponibili. "
+    "Riformula la domanda con più dettagli (prodotto, importo, canale) "
+    "oppure rivolgiti al tuo responsabile di filiale."
+)
 
 PASSAGGI = 5  # quanti passaggi finiscono nel contesto
 

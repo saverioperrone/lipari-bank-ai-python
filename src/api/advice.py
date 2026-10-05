@@ -20,13 +20,13 @@ from src.types.advice import AdviceRequest, AdviceResponse, IngestRequest, Inges
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-PROMPT = load_prompt("advisor_system")
+PROMPT = load_prompt("advisor_system_v2")
 
 # La chiave e' l'utente del token, non l'IP: in filiale trenta operatori escono dallo
 # stesso NAT. `request.state.username` lo scrive get_current_user.
 limiter = Limiter(key_func=lambda request: request.state.username)
 
-riscrittore = QueryRewriter(build_llm_provider(temperature=0), load_prompt("rewrite_system_v1"))
+riscrittore = QueryRewriter(build_llm_provider(temperature=0), load_prompt("rewrite_system_v2"))
 
 
 def get_rewriter() -> QueryRewriter:
