@@ -18,7 +18,9 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = Base.metadata
 
 if config.config_file_name:
-    fileConfig(config.config_file_name)
+    # i logger che esistono già restano accesi: dal Giorno 7 le migration girano anche dentro
+    # pytest, e spegnerli toglierebbe ai test le righe di log che controllano
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def run_migrations_offline() -> None:
