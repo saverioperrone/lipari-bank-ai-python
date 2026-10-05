@@ -15,7 +15,11 @@ dependencies = [
     "instructor>=1.17.0",
     "openai>=3.3.0",
     "pgvector>=0.5.0",
+    "pwdlib[argon2]>=0.3.1",
     "pydantic-settings>=2.15.0",
+    "pyjwt>=2.15.1",
+    "python-multipart>=0.0.32",
+    "slowapi>=0.1.10",
     "sqlalchemy[asyncio]>=2.0.54",
     "uvicorn[standard]>=0.52.4",
 ]
