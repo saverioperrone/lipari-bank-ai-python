@@ -25,7 +25,7 @@ def sequenze(testo: str, n: int = LUNGHEZZA_SEQUENZA) -> set[tuple[str, ...]]:
     stesso documento condividono quasi tutto il vocabolario senza dirsi la stessa cosa.
     """
     parole = re.findall(r"\w+", testo.lower())
-    return {tuple(parole[i:i + n]) for i in range(max(0, len(parole) - n + 1))}
+    return {tuple(parole[i : i + n]) for i in range(max(0, len(parole) - n + 1))}
 
 
 def sovrapposizione(a: str, b: str) -> float:

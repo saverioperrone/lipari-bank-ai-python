@@ -4,7 +4,6 @@ from openai import AsyncOpenAI
 from src.config import settings
 from src.types.categorize import CategorizeRequest, CategorizeResponse
 
-
 CATEGORIZE_SYSTEM = """You are an expert at categorizing Italian bank transactions.
 
 Categories:
@@ -36,7 +35,10 @@ async def categorize(req: CategorizeRequest) -> CategorizeResponse:
         response_model=CategorizeResponse,
         messages=[
             {"role": "system", "content": CATEGORIZE_SYSTEM},
-            {"role": "user", "content": f"Description: {req.description}\nAmount: €{req.amount} {req.currency}"},
+            {
+                "role": "user",
+                "content": f"Description: {req.description}\nAmount: €{req.amount} {req.currency}",
+            },
         ],
         max_retries=2,
         temperature=0.0,  # deterministic
