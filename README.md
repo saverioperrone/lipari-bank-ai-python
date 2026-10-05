@@ -45,9 +45,15 @@ src/
 ├── main.py                 # FastAPI app, middleware, exception handler, router registration
 ├── exceptions.py            # AppError e sottoclassi di dominio
 ├── api/
+│   ├── auth.py              # POST /api/auth/login (G6)
 │   ├── chat.py              # POST /api/ai/chat (echo)
 │   ├── categorize.py        # POST /api/ai/categorize (dummy by keyword)
 │   └── advice.py            # POST /api/ai/advice e /api/ai/documents/ingest (G5)
+├── auth/                    # G6
+│   ├── tokens.py            # emissione e verifica dei JWT
+│   ├── deps.py              # get_current_user, require_role
+│   ├── passwords.py         # hash argon2
+│   └── acl.py               # la matrice ruolo → livelli di visibilità
 ├── types/
 │   ├── chat.py               # ChatRequest, ToolCallInfo, ChatResponse
 │   ├── categorize.py         # CategorizeRequest, CategorizeResponse
@@ -62,12 +68,13 @@ src/
 | Metodo | Path | Descrizione |
 |---|---|---|
 | GET | `/health` | Health check |
-| POST | `/api/ai/chat` | Chat AI — echo (LLM reale in G4) |
+| POST | `/api/auth/login` | Login con form OAuth2: restituisce un access token JWT di 30 minuti (G6) |
+| POST | `/api/ai/chat` | Chat AI, a nome dell'utente del token (G6) |
 | POST | `/api/ai/categorize` | Categorizzazione transazione — dummy by keyword (LLM reale in G4) |
-| POST | `/api/ai/advice` | Risposta vincolata ai documenti, con le fonti citate |
-| POST | `/api/ai/documents/ingest` | Carica un documento nell'indice (sostituisce se l'id esiste) |
+| POST | `/api/ai/advice` | Risposta vincolata ai documenti, con le fonti citate; token obbligatorio, 15 richieste al minuto per utente (G6) |
+| POST | `/api/ai/documents/ingest` | Carica un documento nell'indice (sostituisce se l'id esiste); solo `compliance_lead` e `admin` (G6) |
 
-Tutti gli errori (custom `AppError`, validazione Pydantic, eccezioni impreviste) tornano nello stesso formato JSON: `timestamp`, `status`, `error`, `message`, `path` (+ `details` per la validazione). Ogni response include l'header `X-Request-Id`.
+Tutti gli errori (custom `AppError`, validazione Pydantic, eccezioni impreviste) tornano nello stesso formato JSON: `timestamp`, `status`, `error`, `message`, `path` (+ `details` per la validazione). Fanno eccezione i 401 e i 403 dell'autenticazione, che escono come `{"detail": ...}`: è il rilievo non corretto di `docs/ai-review/G6.md`. Ogni response include l'header `X-Request-Id`.
 
 ## Giorno 5 — RAG con citazioni
 
@@ -170,6 +177,160 @@ Le misure stanno in `docs/eval/*.json`, i rilievi sul codice in `docs/ai-review/
 
 La prima prova non e' deterministica: il modello locale gira a `temperature=0.3` e il
 rifiuto resta una scelta sua, non un controllo del codice.
+
+## Giorno 6 — Chi chiede, e cosa può vedere
+
+Da oggi l'advisor sa chi sta chiedendo: login con token JWT, una matrice ruolo → livelli
+di visibilità, e il filtro dei permessi dentro il `WHERE` della ricerca. Davanti al
+recupero c'è un riscrittore che trasforma le domande da sportello in domande che la
+ricerca sa usare, e la riscritta torna nella risposta (`rewritten_query`): chi legge ha
+il diritto di sapere cosa è stato cercato al posto suo.
+
+### Farlo girare
+
+```bash
+docker compose up -d                        # Postgres con pgvector, e Ollama
+uv sync
+uv run alembic upgrade head
+uv run python -m scripts.seed_users         # Marco, Giulia, Lucia: password «bootcamp»
+uv run uvicorn src.main:app --reload        # in un altro terminale
+uv run python -m scripts.ingest_docs        # login di Giulia, poi le circolari con il loro livello
+uv run python -m scripts.demo_g6            # la stessa domanda da Marco e da Giulia
+```
+
+Il livello di visibilità di un documento è la sua sottocartella:
+`data/docs/compliance_only/aml_controparti_venezuela.md` è il documento riservato del
+canarino, le circolari lasciate in `data/docs/` sono pubbliche.
+
+| Utente | Ruolo | Vede |
+|---|---|---|
+| `mbianchi` | operator | public, internal |
+| `grossi` | compliance_lead | public, internal, compliance_only |
+| `lverdi` | risk_lead | public, internal, risk_only |
+
+```bash
+curl -s -X POST localhost:8000/api/auth/login -d "username=mbianchi&password=bootcamp"
+# {"access_token":"eyJ...","token_type":"bearer"} — nel payload, in chiaro, solo sub, role, iat ed exp
+```
+
+### Le prove del cancello
+
+Sul mio indice, con i miei token, la stessa domanda per tutti: «Cosa si deve fare con un
+bonifico verso una controparte in Venezuela?». La frase riservata si riconosce da quattro
+parole che stanno solo nel documento del canarino: «10.000», «sospeso», «istruttorie»,
+«EDD».
+
+| Prova | Esito |
+|---|---|
+| Il token di Marco | la frase riservata non compare, né nella risposta né nelle fonti |
+| Il token di Giulia | compare in 3 tentativi su 3, e in 2 su 3 il documento riservato è anche fra le fonti |
+| Token alterato di un carattere | 401 «Token non valido» |
+| Token scaduto | 401 «Token scaduto»: distinto dal precedente, chi lo riceve sa che deve rifare il login |
+| Ruolo inesistente nel token («stagista») | solo fonti pubbliche, e nel log del server `ruolo_sconosciuto` |
+| Nessun token | 401 |
+
+Le stesse proprietà le provano i test del blueprint (`tests/test_g6.py`), con un modello
+finto che le citazioni le scrive sempre.
+
+### La misura: le dieci domande con il riscrittore davanti
+
+| | hit@5 | hit@1 |
+|---|---|---|
+| solo vettoriale, ieri e oggi: la ricerca di `/advice` da oggi | 8/10 | 7/10 |
+| **vettoriale con il riscrittore v2 davanti** | **9/10** | 6/10 |
+
+```bash
+uv run python -m scripts.eval_retrieval --etichetta vettoriale_g6
+uv run python -m scripts.eval_retrieval --etichetta riscrittore --riscrittore
+```
+
+Il delta è **+1 su hit@5 e −1 su hit@1**, ed è la linea di partenza. Il punto guadagnato
+è la domanda sui documenti dell'identificazione, che riscritta trova la circolare 09. Un
+altro «OK» è fortunato: «Mi hanno rubato la carta…» viene riscritta come la copia di un
+esempio del prompt, e la circolare giusta entra fra le cinque lo stesso. La ricerca
+ibrida del Giorno 5 (10/10) resta negli script di misura: `/advice` usa
+`search_for_user`, l'unica ricerca con il filtro dei permessi.
+
+### L'estensione C: la riscrittura che non si ripaga due volte
+
+La cache esisteva già (`rewrite_cached`): l'estensione decide la chiave e la misura. La
+chiave è il prompt più la domanda normalizzata (minuscole, spazi singoli, senza la
+punteggiatura finale), il deposito si può passare da fuori, e `cache_hit` finisce nella
+riga di log `advice_completata`.
+
+```bash
+uv run python -m scripts.misura_cache              # la misura: trenta richieste
+uv run pytest tests/test_cache_riscrittura.py      # il test della proprietà
+uv run mypy src scripts                            # strict
+```
+
+| Trenta richieste: dieci domande ellittiche, ognuna tre volte | |
+|---|---|
+| servite dalla cache, con la chiave normalizzata | 20 |
+| servite con la chiave grezza, la domanda così com'è | 10 |
+| chiamate al modello | 10 invece di 30 |
+| una riscrittura vera / una dalla cache | 1,9 s / 0,01 ms |
+| tempo totale | 18,7 s invece di ~56 |
+| lo stesso deposito con il prompt v1 | torna al modello, come deve |
+
+La sequenza è costruita, non presa da un log: ogni domanda due volte identica e una con
+maiuscole, spazi o punteggiatura diversi. Misura quanto vale la chiave, non quanto si
+ripetono le domande in filiale.
+
+**Tre righe a difesa del disegno.** Ho scelto come chiave il prompt più la domanda
+normalizzata, perché sulle trenta richieste la cache ne serve 20 invece delle 10 della
+chiave grezza, e le chiamate al modello scendono da 30 a 10. Ho scartato la chiave sulla
+sola domanda, che è quella della teoria: con un deposito condiviso un prompt nuovo
+riceverebbe le riscritture del vecchio, ed è quello che il test dell'estensione verifica
+che non succeda. Il prezzo è la trappola della consegna: la cache congela anche le
+riscritture sbagliate di un modello non deterministico — «entro quando?» diventa una
+domanda sul Venezuela e resta così finché il processo vive — e l'unica difesa è non
+salvare i ripieghi.
+
+### La demo di due minuti
+
+```bash
+uv run python -m scripts.demo_g6                   # la domanda del canarino
+uv run python -m scripts.demo_g6 "ven ok?"         # la domanda del blueprint
+```
+
+Stessa domanda, stessa riscrittura, fonti diverse: Marco ha la circolare 17, Giulia ha in
+testa `aml_controparti_venezuela`. Da dire ad alta voce: le fonti sono i `[fonte-N]` che
+il modello scrive, e il modello locale li scrive circa una volta su due; se escono vuote,
+si rilancia. La prima risposta dopo l'avvio del server può superare il timeout di 30
+secondi e uscire come risposta parziale: la demo si lancia una volta prima, a vuoto.
+
+### I test
+
+```bash
+uv run pytest     # i 13 del blueprint adattati, quello dell'estensione, quello del Giorno 5
+```
+
+⚠️ La fixture del blueprint fa `TRUNCATE` di `document_chunks`, `chat_sessions` e
+`chat_messages` sul database del `.env`: dopo `pytest` l'indice e le chat sono vuoti. Si
+salva lo stato prima e si ripristina dopo:
+
+```bash
+docker compose exec -T postgres pg_dump -U lipari -d lipari_ai --data-only -t document_chunks -t chat_sessions -t chat_messages > backup.sql
+uv run pytest
+docker compose exec -T postgres psql -U lipari -d lipari_ai -c "TRUNCATE document_chunks, chat_messages, chat_sessions CASCADE"
+docker compose exec -T postgres psql -U lipari -d lipari_ai < backup.sql
+```
+
+Oppure si rilancia `scripts.ingest_docs`, che però rifà solo l'indice, non le chat.
+
+### Cosa resta da sapere
+
+- Le citazioni di `/advice` escono circa una volta su due: il prompt v2 (prompting clinic,
+  esercizio 3) le ha portate da 0 su 6 a 5 su 9, ma il marcatore lo scrive il modello.
+- Il riscrittore copia gli esempi del prompt quando la domanda rimanda a una precedente:
+  `/advice` non riceve la storia della conversazione.
+- Un documento con un'istruzione nascosta non fa uscire niente di riservato, ma la frase
+  finisce nella risposta (prompting clinic, esercizio 4).
+
+I rilievi sul codice stanno in `docs/ai-review/G6.md`, gli esercizi sui prompt in
+`docs/prompting-clinic/G6.md`, i tre prompt di vibe coding in `docs/vibe-coding/G6.md`. Le
+misure grezze stanno in `docs/eval/*.json`.
 
 ## Decisione di design — response_model esplicito vs return type hint
 
