@@ -33,6 +33,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "aiosqlite>=0.22.1",
     "httpx>=0.28.1",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
@@ -74,3 +75,10 @@ pythonpath = ["."]
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 
+[[tool.mypy.overrides]]
+module = "tests.*"
+# Una funzione di test non restituisce niente e riceve fixture: annotarla è rumore, ed è la
+# stessa regola che ruff applica ai test qui sopra. Il corpo si controlla comunque.
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
