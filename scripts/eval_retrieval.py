@@ -2,6 +2,7 @@
 
     uv run python -m scripts.eval_retrieval --etichetta baseline
     uv run python -m scripts.eval_retrieval --etichetta ibrida --ibrida
+    uv run python -m scripts.eval_retrieval --etichetta riscrittore --riscrittore
 
 Chiama il recupero, non `/advice`: il numero da misurare e' del retrieval, e passare
 dalla generazione ci metterebbe dentro la latenza del modello e la sua variabilita'
@@ -23,6 +24,9 @@ from pydantic import BaseModel
 from src.db.session import AsyncSessionLocal
 from src.lib.dedup import senza_ripetizioni
 from src.llm.embedding_client import EmbeddingClient
+from src.llm.factory import build_llm_provider
+from src.llm.prompt import load_prompt
+from src.llm.rewriter import QueryRewriter
 from src.services.retrieval_service import SOGLIA_PREDEFINITA, RetrievalService
 
 USCITA = Path(__file__).parent.parent / "docs" / "eval"
@@ -92,6 +96,7 @@ DOMANDE: list[Domanda] = [
 
 class Esito(BaseModel):
     domanda: str
+    cercata: str     # quello che e' arrivato al recupero: la domanda, o la sua riscritta
     atteso: str
     recuperati: list[str]
     hit_k: bool
@@ -125,7 +130,19 @@ async def main() -> None:
         help="solo vettoriale, ma scartando i passaggi ripetuti: serve a separare"
         " quanto del guadagno viene dalla deduplica e quanto dalla ricerca lessicale",
     )
+    parser.add_argument(
+        "--riscrittore",
+        action="store_true",
+        help="riscrive la domanda prima di cercare, come fa /advice dal Giorno 6",
+    )
     args = parser.parse_args()
+
+    # lo stesso riscrittore dell'app: prompt v2, temperatura 0
+    riscrittore = (
+        QueryRewriter(build_llm_provider(temperature=0), load_prompt("rewrite_system_v2"))
+        if args.riscrittore
+        else None
+    )
 
     embedder = EmbeddingClient()
     esiti: list[Esito] = []
@@ -133,10 +150,11 @@ async def main() -> None:
     async with AsyncSessionLocal() as session:
         retrieval = RetrievalService(session)
         for d in DOMANDE:
-            vettore = await embedder.embed_one(d.testo)
+            cercata = await riscrittore.rewrite(d.testo) if riscrittore else d.testo
+            vettore = await embedder.embed_one(cercata)
             if args.ibrida:
                 passaggi = await retrieval.search_ibrida(
-                    d.testo, vettore, top_k=PRIMI, soglia=SOGLIA_PREDEFINITA
+                    cercata, vettore, top_k=PRIMI, soglia=SOGLIA_PREDEFINITA
                 )
             elif args.dedup:
                 candidati = await retrieval.search(
@@ -149,6 +167,7 @@ async def main() -> None:
             esiti.append(
                 Esito(
                     domanda=d.testo,
+                    cercata=cercata,
                     atteso=d.atteso,
                     recuperati=documenti,
                     hit_k=d.atteso in documenti,
@@ -166,7 +185,7 @@ async def main() -> None:
         ricerca=(
             'ibrida' if args.ibrida else 'vettoriale + deduplica' if args.dedup
             else 'solo vettoriale'
-        ),
+        ) + (' + riscrittore' if args.riscrittore else ''),
         hit_at_k=sum(1 for e in esiti if e.hit_k),
         hit_at_1=sum(1 for e in esiti if e.hit_1),
         vuoti=sum(1 for e in esiti if e.vuoto),
@@ -179,6 +198,8 @@ async def main() -> None:
         segno = "OK " if e.hit_k else "NO "
         primo = " (primo)" if e.hit_1 else ""
         print(f"{segno}{e.domanda[:62]:64} sim {e.similarita_massima:.3f}{primo}")
+        if e.cercata != e.domanda:
+            print(f"    cercata: {e.cercata}")
         if not e.hit_k:
             print(f"    atteso {e.atteso}, recuperato {e.recuperati or 'niente'}")
     print(
