@@ -131,7 +131,7 @@ async def main() -> None:
     esiti: list[Esito] = []
 
     async with AsyncSessionLocal() as session:
-        retrieval = RetrievalService(session, embedder)
+        retrieval = RetrievalService(session)
         for d in DOMANDE:
             vettore = await embedder.embed_one(d.testo)
             if args.ibrida:

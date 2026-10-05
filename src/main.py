@@ -7,9 +7,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import RequestResponseEndpoint
 
-from src.api import advice, categorize, chat
+from src.api import advice, auth, categorize, chat
 from src.config import settings
 from src.exceptions import AppError
 
@@ -102,3 +103,21 @@ async def health() -> HealthResponse:
 app.include_router(chat.router)
 app.include_router(categorize.router)
 app.include_router(advice.router)
+app.include_router(auth.router)
+
+app.state.limiter = advice.limiter  # slowapi lo cerca qui
+
+
+@app.exception_handler(RateLimitExceeded)
+async def handle_rate_limit(req: Request, exc: RateLimitExceeded) -> JSONResponse:
+    return JSONResponse(
+        status_code=429,
+        headers={"Retry-After": "60"},
+        content={
+            "timestamp": datetime.now(UTC).isoformat(),
+            "status": 429,
+            "error": "RATE_LIMIT",
+            "message": "Troppe richieste: riprova fra un minuto",
+            "path": req.url.path,
+        },
+    )

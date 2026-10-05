@@ -62,7 +62,7 @@ Vale la pena notare che input e output contribuiscono quasi in parti uguali alla
 | 1 000 | 0,80 euro | 24 euro |
 | 10 000 | 7,96 euro | 239 euro |
 
-Il tetto giornaliero configurato in `MAX_EUR_PER_DAY` è 5 euro, che a questi numeri corrisponde a circa 6 250 conversazioni al giorno prima che il guardrail cominci a rispondere 429.
+Il tetto giornaliero configurato in `DAILY_BUDGET_EUR` è 5 euro, che a questi numeri corrisponde a circa 6 250 conversazioni al giorno prima che il guardrail cominci a rispondere 429.
 
 ## Limiti di questa misurazione
 

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -27,6 +29,7 @@ class AdviceResponse(BaseModel):
     citations: list[Citation]
     tokens_used: int
     cost_eur: float
+    rewritten_query: str
 
 
 class IngestRequest(BaseModel):
@@ -35,6 +38,7 @@ class IngestRequest(BaseModel):
     # `dict[str, str]` e non `dict`: mypy in strict rifiuta i generici nudi, ed e' lo
     # stesso tipo della colonna `chunk_metadata` in cui questi dati finiscono.
     metadata: dict[str, str] | None = None
+    visibility: Literal["public", "internal", "risk_only", "compliance_only"] = "public"
 
 
 class IngestResponse(BaseModel):

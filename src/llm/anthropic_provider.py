@@ -1,6 +1,10 @@
-from anthropic import AsyncAnthropic
+from typing import cast
 
-from src.llm.types import Message, LLMResponse
+from anthropic import APIError, AsyncAnthropic
+from anthropic.types import MessageParam, TextBlock
+
+from src.exceptions import LLMProviderError
+from src.llm.types import LLMResponse, Message
 
 
 class AnthropicProvider:
@@ -16,14 +20,20 @@ class AnthropicProvider:
     async def complete(self, messages: list[Message], max_tokens: int = 500) -> LLMResponse:
         # Separa system
         system = next((m.content for m in messages if m.role == "system"), None)
-        user_messages = [m.model_dump() for m in messages if m.role != "system"]
-
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            system=system if system else "",
-            messages=user_messages,
+        user_messages = cast(
+            list[MessageParam], [m.model_dump() for m in messages if m.role != "system"]
         )
+
+        try:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                system=system if system else "",
+                messages=user_messages,
+            )
+        except APIError as exc:
+            # l'errore dell'SDK diventa quello di dominio: chi chiama non deve conoscere l'SDK
+            raise LLMProviderError("anthropic", str(exc)) from exc
 
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
@@ -31,7 +41,7 @@ class AnthropicProvider:
         cost_eur = (input_tokens * input_cost + output_tokens * output_cost) / 1000
 
         return LLMResponse(
-            content=response.content[0].text,
+            content=next((b.text for b in response.content if isinstance(b, TextBlock)), ""),
             tokens_used=input_tokens + output_tokens,
             cost_eur=cost_eur,
             model=self.model,

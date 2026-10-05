@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434/v1"
     embedding_model: str = "text-embedding-3-small"
     max_tokens_per_request: int = 2000
-    max_eur_per_day: float = 5.0
+    daily_budget_eur: float = 5.0
     jwt_secret: str
 
 
