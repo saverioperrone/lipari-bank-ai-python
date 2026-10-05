@@ -126,6 +126,7 @@ class RAGService:
         fasi = Fasi()
 
         with _cronometro(fasi, "rewrite_ms"):
+            fasi.cache_hit = self.rewriter.in_cache(question)
             search_query = await self.rewriter.rewrite_cached(question)
 
         with _cronometro(fasi, "embedding_ms"):
