@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -12,6 +13,7 @@ from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionMessageFunctionToolCall,
     ChatCompletionMessageParam,
+    ChatCompletionToolParam,
 )
 from openai.types.completion_usage import CompletionUsage
 from pydantic import ValidationError
@@ -20,13 +22,17 @@ from src.agents.registry import Tool, impronta
 
 logger = logging.getLogger(__name__)
 
-MAX_STEPS = 6  # il tetto dell'endpoint: la commessa ti chiede di misurarlo
+MAX_STEPS = 7  # la domanda del Focus ne chiede 6, più uno per un passo ripetuto: vedi il README
 BUDGET_PER_RUN = Decimal("0.05")  # euro
 PREZZI_PER_1K = {  # euro per mille token (ingresso, uscita), come al Giorno 4
     "gpt-4o-mini": (Decimal("0.00014"), Decimal("0.00056")),
     "gpt-4o": (Decimal("0.0023"), Decimal("0.0091")),
     "llama3.2:3b": (Decimal("0"), Decimal("0")),  # in locale con Ollama: il costo è zero
 }
+MAX_TOKENS = 500  # il tetto di una risposta: entra anche nella stima del costo
+# Quanti caratteri di conversazione fanno un token. Il minimo misurato con
+# scripts/misura_agente.py è 4,05: 3 tiene la stima sopra il conteggio vero del 35%
+CARATTERI_PER_TOKEN = 3
 
 
 @dataclass
@@ -61,11 +67,19 @@ async def run_agent(
     run = RunResult(run_id=str(uuid4()))  # la chiave di ogni riga di traccia
 
     for _ in range(max_steps):  # il tetto è nella struttura
+        # uscita 3, prima della chiamata: quella che sfonderebbe il budget non parte
+        if run.cost_eur + stima_costo(messaggi, schemi, model) > BUDGET_PER_RUN:
+            run.stopped_by = "budget"
+            run.reply = (
+                "Ho interrotto l'elaborazione perché il passo successivo avrebbe superato il "
+                "budget previsto. Prova a formularla in modo più circoscritto."
+            )
+            return run
         run.steps += 1
         risposta = await client.chat.completions.create(
             model=model,
             messages=messaggi,
-            max_tokens=500,
+            max_tokens=MAX_TOKENS,
             tools=schemi or omit,  # l'API rifiuta una lista vuota
         )
         run.cost_eur += _costo(risposta.usage, model)
@@ -148,6 +162,26 @@ def _costo(usage: CompletionUsage | None, model: str) -> Decimal:
         return Decimal("0")
     ingresso, uscita = PREZZI_PER_1K[model]
     return (usage.prompt_tokens * ingresso + usage.completion_tokens * uscita) / 1000
+
+
+def token_stimati(
+    messaggi: list[ChatCompletionMessageParam], schemi: list[ChatCompletionToolParam]
+) -> int:
+    """I token in ingresso della prossima chiamata, contati prima di farla: dai caratteri.
+
+    Conta quello che si spedisce, conversazione e schemi dei tool, senza il tokenizzatore
+    del modello: la stima vale per ogni provider, e l'errore che costa si misura.
+    """
+    caratteri = len(json.dumps([messaggi, schemi], ensure_ascii=False))
+    return math.ceil(caratteri / CARATTERI_PER_TOKEN)
+
+
+def stima_costo(
+    messaggi: list[ChatCompletionMessageParam], schemi: list[ChatCompletionToolParam], model: str
+) -> Decimal:
+    """Il costo della prossima chiamata, prima di farla: l'ingresso stimato, l'uscita al tetto."""
+    ingresso, uscita = PREZZI_PER_1K[model]
+    return (token_stimati(messaggi, schemi) * ingresso + MAX_TOKENS * uscita) / 1000
 
 
 async def _execute(by_name: dict[str, Tool], call: ChatCompletionMessageFunctionToolCall) -> str:
