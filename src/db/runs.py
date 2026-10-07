@@ -81,9 +81,12 @@ class RunRepository:
         return vinta
 
     async def chiudi(self, run_id: str, stato: str) -> None:
+        # La decisione del Giorno 8: la conversazione serve solo a riprendere, e porta IBAN,
+        # saldi e passaggi dei documenti. A run chiuso si svuota: per l'audit restano
+        # `description` e `decisions`
         await self.session.execute(
             update(AgentRunState)
             .where(AgentRunState.id == run_id)
-            .values(status=stato, updated_at=datetime.now(UTC))
+            .values(status=stato, messages=[], pending_calls=[], updated_at=datetime.now(UTC))
         )
         await self.session.commit()
