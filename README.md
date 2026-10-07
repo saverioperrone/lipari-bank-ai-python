@@ -49,13 +49,21 @@ src/
 │   ├── chat.py              # POST /api/ai/chat (echo)
 │   ├── categorize.py        # POST /api/ai/categorize (dummy by keyword)
 │   ├── advice.py            # POST /api/ai/advice e /api/ai/documents/ingest (G5)
-│   └── agent.py             # POST /api/ai/agent (G7)
+│   └── agent.py             # POST /api/ai/agent (G7); supervisor, stato e decisioni (G8)
 ├── agents/                  # G7
 │   ├── registry.py          # Tool: il contratto che il modello legge
 │   ├── tools.py             # i cinque tool, costruiti per l'operatore della richiesta
 │   ├── deps.py              # i servizi dei tool, per ogni richiesta
-│   ├── loop.py              # il ciclo: tre uscite, la traccia, il budget stimato prima
-│   └── prompts.py           # il system prompt dell'agente
+│   ├── loop.py              # il ciclo: quattro uscite, la traccia, il budget stimato prima
+│   ├── prompts.py           # il system prompt dell'agente
+│   ├── approval.py          # G8: riprendere un run sospeso, dopo la decisione
+│   ├── supervisor.py        # G8: il triage, i due specialisti, la sintesi
+│   └── mcp_client.py        # G8: i tool di un server MCP, tradotti in Tool
+├── db/
+│   ├── session.py           # engine, sessioni, Base
+│   ├── models.py            # le tabelle, compresa agent_runs (G8)
+│   ├── repos.py             # chat, conti e movimenti
+│   └── runs.py              # G8: lo stato dei run sospesi, e la decisione presa una volta
 ├── auth/                    # G6
 │   ├── tokens.py            # emissione e verifica dei JWT
 │   ├── deps.py              # get_current_user, require_role
@@ -68,6 +76,8 @@ src/
 │   └── error.py              # ErrorResponse
 └── lipari_bank_ai/
     └── __init__.py         # installable package entry point
+liparibank_mcp/              # G8: il server MCP, accanto a src/
+└── server.py                # tre tool in sola lettura, l'identità dal token
 ```
 
 ## API
@@ -80,7 +90,11 @@ src/
 | POST | `/api/ai/categorize` | Categorizzazione transazione — dummy by keyword (LLM reale in G4) |
 | POST | `/api/ai/advice` | Risposta vincolata ai documenti, con le fonti citate; token obbligatorio, 15 richieste al minuto per utente (G6) |
 | POST | `/api/ai/documents/ingest` | Carica un documento nell'indice (sostituisce se l'id esiste); solo `compliance_lead` e `admin` (G6) |
-| POST | `/api/ai/agent` | L'agente con i tool, per conto dell'utente del token: `run_id`, `reply`, `steps`, `tool_calls`, `stopped_by`, `cost_eur` (G7) |
+| POST | `/api/ai/agent` | L'agente con i tool, per conto dell'utente del token: `run_id`, `reply`, `steps`, `tool_calls`, `stopped_by`, `cost_eur` (G7). Dal G8 si ferma prima di un'azione da approvare: `stopped_by="awaiting_approval"` |
+| POST | `/api/ai/supervisor` | La stessa domanda, divisa fra due specialisti: `risposta`, `instradamento`, `specialisti_completi`, `cost_eur` (G8) |
+| GET | `/api/ai/agent/{run_id}` | Cosa si sta approvando, con lo storico delle firme; lo vedono chi ha chiesto e i responsabili, gli altri ricevono 404 (G8) |
+| POST | `/api/ai/agent/{run_id}/approve` | Approva l'azione sospesa e fa riprendere il run; solo `compliance_lead` e `risk_lead`, mai chi ha chiesto; 409 se non è più in attesa (G8). Sopra i 50.000 € servono due firme diverse (estensione) |
+| POST | `/api/ai/agent/{run_id}/reject` | Respinge l'azione sospesa, con un `motivo` di almeno 10 caratteri; l'agente riferisce il rifiuto (G8) |
 
 Tutti gli errori (custom `AppError`, validazione Pydantic, eccezioni impreviste) tornano nello stesso formato JSON: `timestamp`, `status`, `error`, `message`, `path` (+ `details` per la validazione). Fanno eccezione i 401 e i 403 dell'autenticazione, che escono come `{"detail": ...}`: è il rilievo non corretto di `docs/ai-review/G6.md`. Ogni response include l'header `X-Request-Id`.
 
@@ -338,7 +352,8 @@ Da oggi l'assistente agisce: legge i conti dei clienti di chi chiede, cerca nell
 della banca e può aprire una segnalazione alla Compliance. Decide da solo quali tool usare
 e quante volte, dentro un ciclo che finisce sempre in uno di tre modi, e chi riceve il
 risultato li distingue dal campo `stopped_by`: `model` se ha risposto, `max_steps` se ha
-esaurito i passi, `budget` se ha superato il budget. L'identità non passa dal modello: i
+esaurito i passi, `budget` se ha superato il budget. Dal Giorno 8 le uscite sono quattro: la
+quarta è `awaiting_approval`, quando un'azione aspetta la firma di un responsabile. L'identità non passa dal modello: i
 tool nascono per l'utente del token, che sta nella loro chiusura, e il modello non ha un
 argomento dove scriverne un altro.
 
@@ -478,10 +493,12 @@ tentativo sul conto di un altro:
 ```bash
 curl -s -X POST localhost:8000/api/ai/agent -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
   -d '{"message":"apri una segnalazione di compliance sul conto IT60X0542811101000000123: il cliente vuole fare un bonifico di 25.000 euro verso il Venezuela"}'
-# steps=2, tool_calls=["apri_segnalazione_compliance"], stopped_by="model", e il numero di pratica nella risposta
+# al G7: steps=2, tool_calls=["apri_segnalazione_compliance"], stopped_by="model", e il numero di pratica nella risposta
+# dal G8 si ferma prima del tool, con stopped_by="awaiting_approval": sopra i 5.000 € decide un responsabile
 curl -s -X POST localhost:8000/api/ai/agent -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
   -d '{"message":"apri una segnalazione di compliance sul conto IT60X0542811101000000789: il cliente vuole fare un bonifico di 25.000 euro verso il Venezuela"}'
 # rifiutata dal tool: tool_accesso_negato nel log del server, e nessuna riga nuova in compliance_alerts
+# dal G8 si ferma prima in attesa; se un responsabile approva, il tool la rifiuta allo stesso modo
 ```
 
 La domanda porta l'IBAN, come la scriverebbe un operatore con il gestionale aperto. Con il
@@ -506,9 +523,9 @@ si cambia con `TEST_DATABASE_URL`. La porta di default è la 5433, quella del
 senza, le migration lanciate dalla fixture spegnevano i logger dell'agente, e i cinque test
 che leggono il log con caplog fallivano.
 
-I test del G7 usano SQLite in memoria per le quattro tabelle del giorno, quindi non
-toccano nemmeno il database di test. Il test dell'estensione e quello della traccia stanno
-accanto ai 22 del blueprint, in `tests/unit/`.
+I test del G7 usano SQLite in memoria per le tabelle del giorno (quattro al G7, cinque dal
+G8 con `agent_runs`), quindi non toccano nemmeno il database di test. Il test
+dell'estensione e quello della traccia stanno accanto ai 22 del blueprint, in `tests/unit/`.
 
 ### Cosa resta da sapere
 
@@ -535,6 +552,221 @@ accanto ai 22 del blueprint, in `tests/unit/`.
 I rilievi sul codice stanno in `docs/ai-review/G7.md`, gli esercizi sui prompt in
 `docs/prompting-clinic/G7.md`, i tre prompt di vibe coding in `docs/vibe-coding/G7.md`. La
 misura grezza sta in `docs/eval/agente_g7.json`.
+
+## Giorno 8 — Approvazione umana, multi-agent e MCP
+
+Da oggi, sopra i 5.000 €, o senza importo, l'assistente non apre più una segnalazione da
+solo. Si ferma prima di eseguire qualunque tool di quel passo, salva la conversazione in
+`agent_runs` e aspetta la firma di un responsabile, `compliance_lead` o `risk_lead`, che non
+sia chi ha chiesto. Il lavoro sospeso sopravvive a un riavvio, e la decisione si scrive una
+volta sola.
+
+Accanto all'agente c'è un supervisor, con un triage e due specialisti. In più tre tool sono
+esposti con il protocollo MCP, a chi presenta un token firmato.
+
+### Farlo girare
+
+```bash
+docker compose up -d
+uv sync                                     # da oggi anche fastmcp 4.0.10
+uv run alembic upgrade head                 # la tabella agent_runs
+uv run uvicorn src.main:app                 # in un altro terminale
+
+login() { curl -s -X POST localhost:8000/api/auth/login -d "username=$1&password=bootcamp" \
+  | uv run python -c "import sys,json;print(json.load(sys.stdin)['access_token'])"; }
+A_MARCO="Authorization: Bearer $(login mbianchi)"
+A_GIULIA="Authorization: Bearer $(login grossi)"
+J="Content-Type: application/json"
+```
+
+Le soglie stanno in configurazione: `SOGLIA_APPROVAZIONE_EUR` (5.000) e
+`SOGLIA_DOPPIA_FIRMA_EUR` (50.000, l'estensione). Hanno un default, quindi nel `.env` non
+servono; `.env.example` le elenca.
+
+L'agente lo chiamo come al Giorno 7, con l'IBAN nella domanda e l'importo scritto in cifre:
+«importo 25000 euro». Con la formula del G7, «un bonifico di 25.000 euro», il modello ha
+omesso l'importo in 2 richieste su 3. Con l'importo in cifre l'ha passato in tutte le 6
+richieste che si sono fermate in attesa; una settima non si è fermata, perché il modello ha
+scritto la chiamata come testo.
+
+### Le prove di «Come si vede che è fatta»
+
+Sul database di sviluppo, con `llama3.2:3b` e gli utenti del seed. Le righe aperte dalle
+prove le ho cancellate alla fine.
+
+| Prova | Esito |
+|---|---|
+| Il riavvio | la richiesta da 25.000 si è fermata al primo passo, senza tool eseguiti: in `compliance_alerts` 2 righe prima e 2 dopo, quelle del G7. Poi ho spento il server e i container (`docker compose stop`) e li ho riaccesi. Giulia ha visto la richiesta ancora in attesa e l'ha approvata: il run è ripreso al passo 2, la segnalazione è comparsa solo adesso, a nome di Marco, e il run è `done` |
+| Approva chi ha chiesto | Marco: 403, dal ruolo. Lucia, che il ruolo ce l'ha, sulla propria richiesta: 403, «Chi ha richiesto l'azione non può deciderla» |
+| Approva due volte | in sequenza: 200, poi 409, e una segnalazione sola. Il doppio clic vero, con due curl insieme: 200 e 409, il secondo in 0,3 s, e una segnalazione. Lo stesso con Giulia e Lucia insieme |
+| Respingi, e guarda cosa fa l'assistente | 2 run su 2 senza nessun tool dopo il rifiuto, nessuna segnalazione, e il motivo riferito; il run è `rejected`. Un terzo tentativo non si è fermato affatto: il modello aveva scritto la chiamata come testo |
+| MCP con un token che dichiara `compliance_lead`, firmato con un altro segreto | «Identità non verificata: Token non valido.», e nessun dato |
+
+Sul rifiuto: dopo il primo risultato `llama3.2:3b` non vede più i tool, quindi non potrebbe
+tentare un'altra strada nemmeno volendo. La frase del rifiuto la prova il test, che
+controlla cosa riceve il modello. Le due risposte vere riferiscono il motivo, e una aggiunge
+«non possiamo trovare un'altra strada per ottenere lo stesso risultato».
+
+### Il server MCP, verificato con Inspector
+
+```bash
+TOK=$(login mbianchi)
+npx @modelcontextprotocol/inspector -e LIPARI_TOKEN=$TOK uv run python -m liparibank_mcp.server   # nel browser
+npx @modelcontextprotocol/inspector --cli uv run python -m liparibank_mcp.server -- --method tools/list -e LIPARI_TOKEN=$TOK
+```
+
+Inspector 2.9 vuole Node 22.19 o più recente. I tre controlli li ho fatti in modalità CLI,
+che dà un'uscita da riportare. Nella CLI il comando del server va prima del `--` e le
+opzioni dopo, al contrario di come si legge nell'aiuto.
+
+| Controllo | Esito |
+|---|---|
+| l'elenco | i tre tool, con la docstring come descrizione e `readOnlyHint` a `true` |
+| `get_account_balance` su un conto di C-10234 | «Saldo di IT60X0542811101000000123: 48200.00 EUR» |
+| lo stesso sul conto di Anna Greco | «Non risulta nel portafoglio di questo operatore.» |
+| `LIPARI_TOKEN=abc` | «Identità non verificata: Token non valido.», senza stack trace e senza saldo |
+
+Lo script del 4.9 (`uv run python -m scripts.agente_con_mcp "$TOK" "qual è la soglia per i
+bonifici verso paesi a rischio?"`) l'ho lanciato 4 volte.
+- In 2 il modello ha chiamato `search_policy` attraverso il server, ma le risposte non citano
+  i documenti, e una mescola i 7.500 € della circolare 17 con i 10.000 € del documento
+  interno.
+- Nelle altre 2 ha scritto la chiamata come testo.
+
+### La misura: un agente contro due specialisti
+
+La stessa domanda, «il cliente C-10234 può disporre 25.000 verso il Venezuela dal conto
+principale?», a `/agent` e a `/supervisor`, come li chiamano gli endpoint. Ho fatto 10 run
+per endpoint, in due serie da 5, con una spia sulle chiamate al modello. Il costo è 0 € per
+tutti e due, quindi confronto chiamate, token e secondi.
+
+| 10 run | `/agent` | `/supervisor` |
+|---|---|---|
+| chiamate al modello, media | 1,9 | 4,5 |
+| token per run, media | 1.303 | 1.630 |
+| secondi, mediana | 4,35 | 17,0 |
+| instradamento del triage | — | `entrambi` 4, `dati_conto` 6 |
+| risposte con il saldo vero, 48.200 € | 0 su 10 | 0 su 10 |
+
+Nella prima serie una chiamata del supervisor è durata 306 s per 106 token d'uscita, quando
+di solito ne bastano 3-5. Era un intoppo di Ollama, e ho ripetuto la serie: la mediana non ne
+risente. Con questo modello il supervisor costa un quarto di token in più e quattro volte il
+tempo, e la domanda va a tutti e due gli specialisti solo in 4 run su 10. Il saldo non arriva
+in nessuno dei 20 run, perché il modello passa il codice cliente al posto dell'IBAN.
+
+Il triage usa il modello dell'endpoint e non `gpt-4o-mini`. Il client è uno solo e parla
+con il provider di `DEFAULT_MODEL`, e con Ollama un modello di OpenAI non esiste. In locale
+il triage costa zero come il resto, quindi qui il terzo segnale della pagina 2, «costi molto
+diversi», non vale.
+
+### La decisione: tutta la conversazione, svuotata alla chiusura
+
+**Tre righe.** Nel database salvo tutta la conversazione, come il blueprint. Riprendere è
+rimettere in piedi una lista, e qui la lista è corta: con questo modello un run si ferma al
+primo passo, con 3 messaggi e 1,5 KB. Ho scartato il solo punto di sospensione, che chiede di
+riscrivere la ripresa per ricostruire un contesto che non sarebbe identico all'originale.
+
+Il contenuto riservato (IBAN, saldi, passaggi dei documenti fino al livello di chi ha
+chiesto) resta nella colonna solo finché serve. Quando il run si chiude, `messages` e
+`pending_calls` si svuotano, e per l'audit restano `description` e `decisions`. L'API non
+restituisce mai la conversazione. Sul run della prova del riavvio, dopo l'approvazione:
+`messages` 0, `pending_calls` 0, una voce in `decisions`.
+
+### L'estensione 1: due firme sopra i 50.000 €
+
+Sopra i 50.000 €, o senza importo, una segnalazione la firmano due responsabili diversi.
+Fra la prima e la seconda firma il run ha uno stato suo, `awaiting_second_approval`: non è
+in attesa della prima firma, e non è ripreso.
+
+```bash
+uv run pytest tests/unit/test_doppia_firma.py      # la prova della proprietà
+```
+
+Il test fa la prima firma, controlla che nella tabella ci sia lo stato intermedio e nessuna
+segnalazione, riceve 403 se la stessa persona riprova, e con la firma di un altro
+responsabile trova la segnalazione. Con la seconda soglia alzata a 100.000 il test fallisce,
+come deve.
+
+Sul sistema vero, su una segnalazione da 60.000, ho fatto la prima firma con Giulia, poi ho
+spento e riacceso il server. Giulia ha riprovato la seconda firma e ha ricevuto 403; con
+quella di Lucia la segnalazione è comparsa. Lo storico ha «grossi, prima firma» e «lverdi,
+approvata».
+
+**Tre righe a difesa del disegno.** Ho scelto uno stato con un nome nella stessa colonna
+`status`, e la seconda firma come un altro UPDATE condizionato che esclude chi ha messo la
+prima. Così un doppio clic o un riavvio fra le due firme trovano una riga che dice dove si è
+fermi. Ho scartato una tabella delle firme, che chiede una migration e due stati da tenere
+d'accordo. Ho scartato anche il conteggio delle firme dentro `decisions`: è un JSON da
+leggere e riscrivere, e due clic insieme leggerebbero lo stesso conteggio.
+
+Lo so dal test (0 segnalazioni dopo la prima firma, 403 alla stessa persona, 1 dopo la
+seconda) e dal sistema vero, riavviato fra le due firme. Senza importo firmano in due, come
+per la prima soglia. Ma il modello l'ha omesso in 2 richieste su 3 con la formula del G7, e in
+quel caso la seconda approvazione della stessa persona riceve 403 invece di 409.
+
+### La demo di due minuti
+
+Una richiesta sopra soglia, la tabella vuota, il sistema spento e riacceso, l'approvazione
+che la porta a termine, e il tentativo di approvare da sé:
+
+```bash
+curl -s -X POST localhost:8000/api/ai/agent -H "$A_MARCO" -H "$J" \
+  -d '{"message":"apri una segnalazione di compliance sul conto IT60X0542811101000000123, importo 25000 euro: il cliente vuole fare un bonifico verso il Venezuela"}'
+# stopped_by="awaiting_approval", il run_id, e «Nulla è stato ancora eseguito»
+RUN_ID=<il run_id della risposta>
+docker compose exec postgres psql -U lipari -d lipari_ai -c "select count(*) from compliance_alerts"
+# Ctrl+C sul server, poi
+docker compose stop && docker compose start
+uv run uvicorn src.main:app                                                   # di nuovo
+curl -s localhost:8000/api/ai/agent/$RUN_ID -H "$A_GIULIA"                    # cosa sta approvando
+curl -s -X POST localhost:8000/api/ai/agent/$RUN_ID/approve -H "$A_GIULIA"    # stopped_by="model"
+docker compose exec postgres psql -U lipari -d lipari_ai -c "select count(*) from compliance_alerts"
+curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8000/api/ai/agent/$RUN_ID/approve -H "$A_MARCO"   # 403
+```
+
+Il token dura 30 minuti, e quello preso prima del riavvio vale anche dopo. Il conteggio sale
+di uno solo dopo l'approvazione.
+
+### I test
+
+```bash
+uv run pytest tests/unit -q        # 45: 22 del G7, 13 di oggi, 7 del server MCP, i nostri 3
+uv run pytest                      # tutti: 60
+uv run mypy src tests liparibank_mcp scripts
+uv run ruff check src tests liparibank_mcp scripts
+```
+
+- I test di oggi usano l'app del corso su un database SQLite su file, perché il test del
+  riavvio lo riapre da un altro processo Python e approva da lì.
+- Il server MCP gira in memoria in tre test, e come processo figlio, via stdio, in uno.
+- Un test svuota `document_chunks`, ma lo fa sul database di test, mai su quello del `.env`.
+
+Due file di ieri sono cambiati, perché da oggi un tool che scrive chiede l'approvazione:
+- in `tests/unit/test_traccia.py` la segnalazione ha un importo sotto soglia, perché lì non
+  c'è nessuno a cui chiedere;
+- `scripts/misura_agente.py` dà a `Deps` il campo `runs`.
+
+### Cosa resta da sapere
+
+- Un run in attesa non scade mai, né alla prima firma né alla seconda: è il rilievo non
+  corretto di `docs/ai-review/G8.md`. Un run dimenticato si trova con
+  `status like 'awaiting%'`.
+- Il client MCP non ha timeout: con un server che non risponde il loop aspetta senza fine.
+  Un server che muore, invece, dà errore in 0,1 s.
+- Il modello riscrive il numero di pratica nella risposta. Ha scritto «F44a80e6…» per
+  `f44a80e6…` e «CB 7715FD AC4F…» per `cb7715fd-ac4f…`, e una volta ne ha inventato un
+  secondo («è 234567890»). Quello vero sta nella tabella e nella ricevuta del log.
+- A volte il modello scrive la chiamata come testo. Il loop la legge come una risposta, e
+  allora non si ferma niente: è successo in una richiesta da respingere e in 2 run su 4 dello
+  script MCP.
+- Il triage con il prompt del blueprint manda su `entrambi` 35 domande su 50, quasi sempre
+  perché risponde invece di classificare (prompting clinic, esercizio 1).
+- Con il «confermo già adesso», l'approvazione chiesta nel prompt ha lasciato partire il tool
+  in 4 run su 5 (esercizio 4).
+- Inspector crea un catalogo vuoto nella home, `~/.mcp-inspector/mcp.json`.
+
+I rilievi sul codice stanno in `docs/ai-review/G8.md`, gli esercizi sui prompt in
+`docs/prompting-clinic/G8.md`, i tre prompt di vibe coding in `docs/vibe-coding/G8.md`.
 
 ## Decisione di design — response_model esplicito vs return type hint
 
