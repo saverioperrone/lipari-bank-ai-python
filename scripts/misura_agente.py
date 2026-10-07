@@ -28,6 +28,7 @@ from src.agents.tools import build_tools_for
 from src.auth.deps import UserContext
 from src.config import settings
 from src.db.repos import AccountRepository, MovementRepository
+from src.db.runs import RunRepository
 from src.db.session import AsyncSessionLocal
 from src.llm.factory import get_embedder, get_openai
 from src.services.alerts import AlertService
@@ -88,6 +89,7 @@ async def una_domanda(domanda: str) -> dict[str, Any]:
             accounts=AccountRepository(session),
             movements=MovementRepository(session),
             alerts=AlertService(session),
+            runs=RunRepository(session),  # dal Giorno 8 Deps ha anche il repository dei run
             retrieval=RetrievalService(session),
             embedder=get_embedder(),
             openai=get_openai(),

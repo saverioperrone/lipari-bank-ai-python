@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +24,7 @@ class Settings(BaseSettings):
     max_tokens_per_request: int = 2000
     daily_budget_eur: float = 5.0
     jwt_secret: str
+    soglia_approvazione_eur: Decimal = Decimal("5000")  # sopra, decide una persona
 
 
 settings = Settings()  # raise at import if missing required

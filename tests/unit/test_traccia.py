@@ -41,10 +41,11 @@ async def test_dalle_righe_agent_step_si_ricostruisce_il_run(
         risposta(tool="get_account_balance", argomenti=f"{{{conto}}}"),
         risposta(tool="search_documents", argomenti='{"query": "bonifici verso paesi a rischio"}'),
         risposta(tool="list_recent_movements", argomenti=f'{{{conto}, "n": 10}}'),
+        # dal Giorno 8 sotto soglia: qui non c'è nessuno a cui chiedere l'approvazione
         risposta(
             tool="apri_segnalazione_compliance",
             argomenti=f'{{{conto}, "motivo": "Bonifico di 25.000 euro verso il Venezuela", '
-            '"importo": "25000"}',
+            '"importo": "1200"}',
         ),
         risposta(testo="Il bonifico non si esegue allo sportello: segnalazione aperta."),
     ]
