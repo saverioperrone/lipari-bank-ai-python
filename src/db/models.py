@@ -169,6 +169,7 @@ class AgentRunState(Base):
     role: Mapped[str] = mapped_column(String(32))  # i tool si rifanno per lui
     status: Mapped[str] = mapped_column(String(32), index=True)
     # awaiting_approval | running | done | rejected
+    # e, con l'estensione delle due firme, awaiting_second_approval fra la prima e la seconda
     messages: Mapped[list[dict[str, Any]]] = mapped_column(JSON_O_JSONB)  # ← lo stato
     pending_calls: Mapped[list[dict[str, Any]]] = mapped_column(JSON_O_JSONB)
     description: Mapped[str] = mapped_column(Text)  # cosa si sta approvando

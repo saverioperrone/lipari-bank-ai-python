@@ -4,7 +4,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from src.agents.approval import riprendi
+from src.agents.approval import riprendi, serve_doppia_firma
 from src.agents.deps import Deps, get_deps
 from src.agents.loop import RunResult, run_agent
 from src.agents.prompts import AGENT_SYSTEM
@@ -27,6 +27,7 @@ class AgentResponse(BaseModel):
     steps: int
     tool_calls: list[str]
     stopped_by: str  # "model" | "max_steps" | "budget" | "awaiting_approval"
+    # e, con l'estensione delle due firme, "awaiting_second_approval"
     cost_eur: float
 
 
@@ -152,13 +153,37 @@ async def _decidi(
             status.HTTP_403_FORBIDDEN, "Chi ha richiesto l'azione non può deciderla"
         )
 
+    # 2b. estensione: fra la prima e la seconda firma il run ha uno stato suo, e da lì
+    #     esce solo con la decisione di un altro responsabile
+    in_attesa = (
+        "awaiting_second_approval"
+        if stato.status == "awaiting_second_approval"
+        else "awaiting_approval"
+    )
+    if in_attesa == "awaiting_second_approval" and stato.decided_by == approvatore.username:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "La seconda decisione spetta a un altro responsabile"
+        )
+    prima_firma = approvato and in_attesa == "awaiting_approval" and serve_doppia_firma(stato, deps)
+    nuovo = "awaiting_second_approval" if prima_firma else "running" if approvato else "rejected"
+
     # 3. la decisione si scrive una volta sola: l'UPDATE condizionato fa vincere un clic,
     #    e da qui la riga dice chi ha deciso e quando — prima che l'azione parta
     decisa = await deps.runs.decidi(
-        run_id, da=approvatore.username, stato="running" if approvato else "rejected", motivo=motivo
+        run_id, da=approvatore.username, stato=nuovo, motivo=motivo, in_attesa=in_attesa
     )
     if not decisa:
         raise HTTPException(status.HTTP_409_CONFLICT, "L'esecuzione non è più in attesa")
+    if prima_firma:  # estensione: niente riparte, la risposta dice che manca la seconda firma
+        return AgentResponse(
+            run_id=run_id,
+            reply=f"Prima firma di {approvatore.username} registrata: serve la firma di un "
+            "secondo responsabile. Nulla è stato ancora eseguito.",
+            steps=stato.steps,
+            tool_calls=list(stato.tool_calls),
+            stopped_by="awaiting_second_approval",
+            cost_eur=float(stato.cost_eur),
+        )
 
     # 4. si riprende, con i tool di chi aveva chiesto
     ripreso = await riprendi(

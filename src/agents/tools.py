@@ -161,6 +161,7 @@ def build_tools_for(user: UserContext, deps: Deps) -> list[Tool]:
             segnalazione,
             # Giorno 8: sopra soglia, o senza importo, decide una persona
             serve_approvazione=_sopra_soglia,
+            serve_doppia_firma=_sopra_doppia_soglia,  # estensione: sopra, firmano in due
             senza_dati=SENZA_DATI,
         ),
     ]
@@ -169,3 +170,8 @@ def build_tools_for(user: UserContext, deps: Deps) -> list[Tool]:
 def _sopra_soglia(a: SegnalazioneArgs) -> bool:
     """Un importo che non c'è non è un importo piccolo: nel dubbio si chiede."""
     return a.importo is None or a.importo > settings.soglia_approvazione_eur
+
+
+def _sopra_doppia_soglia(a: SegnalazioneArgs) -> bool:
+    """La stessa regola, un gradino più su: senza importo, nel dubbio, firmano in due."""
+    return a.importo is None or a.importo > settings.soglia_doppia_firma_eur

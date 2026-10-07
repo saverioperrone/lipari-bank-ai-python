@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     daily_budget_eur: float = 5.0
     jwt_secret: str
     soglia_approvazione_eur: Decimal = Decimal("5000")  # sopra, decide una persona
+    soglia_doppia_firma_eur: Decimal = Decimal("50000")  # estensione: sopra, firmano in due
 
 
 settings = Settings()  # raise at import if missing required

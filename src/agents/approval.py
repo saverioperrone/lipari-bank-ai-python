@@ -53,3 +53,22 @@ async def riprendi(
         user=richiedente,
         run=run,
     )
+
+
+def serve_doppia_firma(stato: AgentRunState, deps: Deps) -> bool:
+    """Estensione: se una delle azioni in attesa va firmata da due responsabili diversi.
+
+    Decide come `richiede_approvazione`: sugli argomenti validati, con i tool di chi ha chiesto.
+    """
+    richiedente = UserContext(username=stato.username, role=stato.role)
+    by_name = {t.name: t for t in build_tools_for(richiedente, deps)}
+    for dati in stato.pending_calls:
+        call = ChatCompletionMessageFunctionToolCall.model_validate(dati)
+        tool = by_name.get(call.function.name)
+        if tool is None or tool.serve_doppia_firma is None:
+            continue
+        if not richiede_approvazione(by_name, call):
+            continue  # in lettura, sotto la prima soglia, o con argomenti che non partiranno
+        if tool.serve_doppia_firma(tool.args_model.model_validate_json(call.function.arguments)):
+            return True
+    return False

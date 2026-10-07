@@ -21,6 +21,9 @@ class Tool:
     # Solo per chi scrive: dice, dagli argomenti validati, se serve l'approvazione.
     # None vuol dire «sempre»: il tool nuovo che nessuno ha pensato è protetto.
     serve_approvazione: Callable[[Any], bool] | None = None
+    # Estensione: dagli stessi argomenti, se l'azione la firmano due responsabili diversi.
+    # None vuol dire «basta una firma»: chiusa per default resta la prima approvazione
+    serve_doppia_firma: Callable[[Any], bool] | None = None
 
     def to_openai_schema(self) -> ChatCompletionToolParam:
         schema = self.args_model.model_json_schema()
