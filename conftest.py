@@ -14,6 +14,11 @@ os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://lipari:lipari@localhost:5433/lipari_ai_test"
 )
 os.environ.setdefault("JWT_SECRET", "segreto-dei-test-lungo-almeno-trentadue-caratteri")
+# Dal Giorno 9: chiavi finte, anche qui senza setdefault. La tua chiave vera sta nel .env, e un test
+# che dimentica il suo finto la userebbe: con questa riceve un 401, che si vede, invece di una
+# fattura, che no. Deve stare qui in cima, prima che l'import di src costruisca Settings.
+os.environ["OPENAI_API_KEY"] = "sk-test-mai-valida"
+os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test-mai-valida"
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -36,11 +41,12 @@ def modelli_finti() -> Iterator[None]:
     from src.auth.deps import get_current_user
     from src.llm.factory import get_embedder, get_llm_provider
     from src.main import app
-    from tests.finti import MARCO, ModelloEco, embedder_finto, riscrittore_spento
+    from tests.finti import ModelloEco, embedder_finto, marco_senza_token, riscrittore_spento
 
     app.dependency_overrides[get_llm_provider] = ModelloEco
     app.dependency_overrides[get_embedder] = embedder_finto
     app.dependency_overrides[get_rewriter] = riscrittore_spento  # dal Giorno 6
-    app.dependency_overrides[get_current_user] = lambda: MARCO  # dal Giorno 6: chi chiede
+    # dal Giorno 6: chi chiede. Dal Giorno 9 scrive anche lo username che il limite di /advice legge
+    app.dependency_overrides[get_current_user] = marco_senza_token
     yield
     app.dependency_overrides.clear()
