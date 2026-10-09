@@ -1,0 +1,40 @@
+{"id": "cat-001", "input": {"description": "Bolletta Enel Energia", "amount": 87.40}, "expected": {"category": "UTILITIES"}, "nota": "caso base, fornitore noto"}
+{"id": "cat-002", "input": {"description": "Esselunga Milano", "amount": 64.15}, "expected": {"category": "GROCERIES"}, "nota": "caso base"}
+{"id": "cat-003", "input": {"description": "Trenitalia Milano-Roma", "amount": 89.90}, "expected": {"category": "TRANSPORT"}, "nota": "caso base"}
+{"id": "cat-004", "input": {"description": "Pizzeria da Gino", "amount": 32.50}, "expected": {"category": "RESTAURANTS"}, "nota": "caso base"}
+{"id": "cat-005", "input": {"description": "Netflix", "amount": 12.99}, "expected": {"category": "ENTERTAINMENT"}, "nota": "abbonamento"}
+{"id": "cat-006", "input": {"description": "PAGAMENTO POS 4412 MILANO", "amount": 23.50}, "expected": {"category": "OTHER"}, "nota": "descrizione opaca: non si può dedurre, OTHER è la risposta corretta"}
+{"id": "cat-007", "input": {"description": "Fastweb abbonamento", "amount": 29.95}, "expected": {"category": "UTILITIES"}, "nota": "telefonia: utenza, non intrattenimento"}
+{"id": "cat-008", "input": {"description": "ATM abbonamento mensile", "amount": 39.00}, "expected": {"category": "TRANSPORT"}, "nota": "sigla: ATM è il trasporto di Milano, non lo sportello"}
+{"id": "cat-009", "input": {"description": "Commissione bonifico", "amount": 0.10}, "expected": {"category": "OTHER"}, "nota": "un costo bancario: nessuna delle cinque categorie"}
+{"id": "cat-010", "input": {"description": "Coop Lombardia", "amount": 38.60}, "expected": {"category": "GROCERIES"}, "nota": "caso base"}
+{"id": "cat-011", "input": {"description": "Trattoria Milanese", "amount": 58.00}, "expected": {"category": "RESTAURANTS"}, "nota": "caso base, dal seed"}
+{"id": "cat-012", "input": {"description": "Osteria del Ponte", "amount": 44.70}, "expected": {"category": "RESTAURANTS"}, "nota": "dal seed: osteria è un ristorante anche se la parola non c'è"}
+{"id": "cat-013", "input": {"description": "Conad Bergamo", "amount": 54.20}, "expected": {"category": "GROCERIES"}, "nota": "dal seed, il conto di Anna Greco"}
+{"id": "cat-014", "input": {"description": "Bonifico estero verso Panama", "amount": 9800.00}, "expected": {"category": "OTHER"}, "nota": "dal seed: un bonifico non è una spesa di categoria, e il paese non la cambia"}
+{"id": "cat-015", "input": {"description": "Accredito stipendio", "amount": 2850.00}, "expected": {"category": "OTHER"}, "nota": "dal seed: un'entrata, e le categorie sono tutte di spesa"}
+{"id": "cat-016", "input": {"description": "Giroconto da principale", "amount": 500.00}, "expected": {"category": "OTHER"}, "nota": "dal seed: soldi fra due conti dello stesso cliente"}
+{"id": "cat-017", "input": {"description": "Interessi trimestrali", "amount": 0.37}, "expected": {"category": "OTHER"}, "nota": "dal seed: voce bancaria, importo minimo"}
+{"id": "cat-018", "input": {"description": "Accredito pensione", "amount": 1640.00}, "expected": {"category": "OTHER"}, "nota": "dal seed: un'entrata"}
+{"id": "cat-019", "input": {"description": "ADDEBITO SDD ENEL ENERGIA SPA", "amount": 92.15}, "expected": {"category": "UTILITIES"}, "nota": "il fornitore di cat-001 nel formato dell'estratto conto: SDD è l'addebito diretto"}
+{"id": "cat-020", "input": {"description": "BOLL. A2A ENERGIA FATT. 0923", "amount": 79.99}, "expected": {"category": "UTILITIES"}, "nota": "abbreviazioni e numero di fattura"}
+{"id": "cat-021", "input": {"description": "Acquedotto Pugliese bolletta acqua", "amount": 41.20}, "expected": {"category": "UTILITIES"}, "nota": "l'acqua, non solo luce e gas"}
+{"id": "cat-022", "input": {"description": "TIM linea fissa bimestre", "amount": 54.90}, "expected": {"category": "UTILITIES"}, "nota": "telefono: utenza"}
+{"id": "cat-023", "input": {"description": "Eni Plenitude gas", "amount": 118.30}, "expected": {"category": "UTILITIES"}, "nota": "Eni qui è il gas di casa, non il distributore: vedi cat-024"}
+{"id": "cat-024", "input": {"description": "ENILIVE STAZIONE A1 CARBURANTE", "amount": 65.00}, "expected": {"category": "TRANSPORT"}, "nota": "lo stesso marchio di cat-023, e qui è carburante: categoria diversa"}
+{"id": "cat-025", "input": {"description": "POS ESSELUNGA 1234 MILANO", "amount": 71.08}, "expected": {"category": "GROCERIES"}, "nota": "POS con l'esercente leggibile: si deduce, a differenza di cat-006"}
+{"id": "cat-026", "input": {"description": "Lidl Italia", "amount": 32.47}, "expected": {"category": "GROCERIES"}, "nota": "caso base"}
+{"id": "cat-027", "input": {"description": "Macelleria Rossi", "amount": 27.80}, "expected": {"category": "GROCERIES"}, "nota": "alimentari, non supermercato"}
+{"id": "cat-028", "input": {"description": "Italo treno Napoli-Roma", "amount": 45.90}, "expected": {"category": "TRANSPORT"}, "nota": "caso base, un altro vettore"}
+{"id": "cat-029", "input": {"description": "Telepass pedaggi autostradali", "amount": 38.40}, "expected": {"category": "TRANSPORT"}, "nota": "pedaggi: trasporto anche se non è un mezzo"}
+{"id": "cat-030", "input": {"description": "Parcheggio stazione centrale", "amount": 12.00}, "expected": {"category": "TRANSPORT"}, "nota": "i parcheggi sono nella categoria dei trasporti"}
+{"id": "cat-031", "input": {"description": "McDonald's Roma Termini", "amount": 11.40}, "expected": {"category": "RESTAURANTS"}, "nota": "fast food"}
+{"id": "cat-032", "input": {"description": "Bar Centrale colazione", "amount": 4.20}, "expected": {"category": "RESTAURANTS"}, "nota": "bar, importo piccolo"}
+{"id": "cat-033", "input": {"description": "Spotify Premium", "amount": 10.99}, "expected": {"category": "ENTERTAINMENT"}, "nota": "streaming"}
+{"id": "cat-034", "input": {"description": "UCI Cinemas biglietti", "amount": 19.00}, "expected": {"category": "ENTERTAINMENT"}, "nota": "cinema"}
+{"id": "cat-035", "input": {"description": "Virgin Active quota mensile palestra", "amount": 69.00}, "expected": {"category": "ENTERTAINMENT"}, "nota": "palestra: nella tassonomia della banca è ENTERTAINMENT, non salute"}
+{"id": "cat-036", "input": {"description": "PRELIEVO ATM 0042 MILANO", "amount": 250.00}, "expected": {"category": "OTHER"}, "nota": "qui ATM è lo sportello automatico, non i trasporti di Milano: la sigla di cat-008, con il significato opposto"}
+{"id": "cat-037", "input": {"description": "AMAZON MARKETPLACE IT", "amount": 39.90}, "expected": {"category": "OTHER"}, "nota": "un marketplace vende di tutto: non si deduce"}
+{"id": "cat-038", "input": {"description": "SATISPAY*M.ROSSI", "amount": 15.00}, "expected": {"category": "OTHER"}, "nota": "pagamento fra persone, senza esercente"}
+{"id": "cat-039", "input": {"description": "Farmacia Comunale", "amount": 18.60}, "expected": {"category": "OTHER"}, "nota": "la salute non ha una categoria sua: OTHER, non GROCERIES"}
+{"id": "cat-040", "input": {"description": "F24 Agenzia Entrate", "amount": 312.00}, "expected": {"category": "OTHER"}, "nota": "tasse"}
