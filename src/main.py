@@ -1,5 +1,7 @@
+import re
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request, Response
@@ -8,11 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
-from starlette.middleware.base import RequestResponseEndpoint
 
-from src.api import advice, agent, auth, categorize, chat
+from src.api import admin, advice, agent, auth, categorize, chat
 from src.config import settings
 from src.exceptions import AppError
+from src.observability.json_log import configura_log, request_id
+
+configura_log()  # Giorno 9: le righe di log diventano JSON, con il request_id
+ID_VALIDO = re.compile(r"[A-Za-z0-9-]{8,64}")  # dal Giorno 2: la forma di un id che si riusa
 
 
 class HealthResponse(BaseModel):
@@ -38,12 +43,18 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def add_request_id(request: Request, call_next: RequestResponseEndpoint) -> Response:
-    request_id = str(uuid.uuid4())
-    start = time.time()
+async def add_request_id(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
+    # Se il chiamante ne manda uno, lo stesso id attraversa i due sistemi; se non lo manda,
+    # o manda qualcosa che non ha la forma di un id, se ne genera uno nuovo.
+    ricevuto = request.headers.get("X-Request-Id", "")
+    rid = ricevuto if ID_VALIDO.fullmatch(ricevuto) else str(uuid.uuid4())
+    request_id.set(rid)  # Giorno 9: da qui ogni riga di log di questa richiesta lo porta
+    inizio = time.perf_counter()
     response = await call_next(request)
-    response.headers["X-Request-Id"] = request_id
-    response.headers["X-Process-Time"] = str(time.time() - start)
+    response.headers["X-Request-Id"] = rid
+    response.headers["X-Process-Time"] = f"{time.perf_counter() - inizio:.4f}"
     return response
 
 
@@ -105,6 +116,7 @@ app.include_router(categorize.router)
 app.include_router(advice.router)
 app.include_router(auth.router)
 app.include_router(agent.router)
+app.include_router(admin.router)  # Giorno 9: il rapporto sui costi
 
 app.state.limiter = advice.limiter  # slowapi lo cerca qui
 
