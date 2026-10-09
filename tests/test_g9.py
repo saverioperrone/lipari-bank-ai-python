@@ -16,6 +16,7 @@ from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import func, select, text
 
 from evals import runner
+from evals.confronto import confronta, esiti_dei_casi, impronta
 from evals.runner import Metriche, Spesa, cancello, eval_advice, eval_categorize, eval_traiettorie
 from src.api.advice import get_rewriter, limiter
 from src.auth.deps import UserContext, get_current_user
@@ -289,7 +290,7 @@ def test_il_cancello_vuole_tutte_le_metriche_sopra_soglia() -> None:
 
 @pytest.mark.parametrize(("punteggio", "codice"), [(0.9, 0), (0.5, 1)])
 async def test_main_esce_con_il_codice_che_ferma_la_ci(
-    monkeypatch: pytest.MonkeyPatch, punteggio: float, codice: int
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, punteggio: float, codice: int
 ) -> None:
     """Solo l'advice cambia: sotto la sua soglia, basta lei a fermare il merge."""
     for nome in ("categorize", "advice", "traiettorie"):
@@ -298,6 +299,8 @@ async def test_main_esce_con_il_codice_che_ferma_la_ci(
             return _metrica(_nome, punteggio if _nome == "advice" else 0.95)
 
         monkeypatch.setattr(runner, f"eval_{nome}", finta)
+    # estensione 3: main salva gli esiti, e quelli di una prova finta non vanno in docs/eval/
+    monkeypatch.setattr(runner, "PRECEDENTE", tmp_path / "esiti.json")
     assert await runner.main() == codice
 
 
@@ -453,3 +456,24 @@ async def test_il_request_id_della_richiesta_finisce_nei_log() -> None:
         logging.getLogger("src").removeHandler(spia)
     assert r.headers["X-Request-Id"] == "req-da-fuori-1"
     assert visti and set(visti) == {"req-da-fuori-1"}
+
+
+# ---------------------------------------------------------------- estensione 3: il confronto
+def test_il_confronto_resta_sul_sottoinsieme_congelato() -> None:
+    """Aggiungere o riscrivere casi non sposta il confronto: si confronta per id, e
+    l'aggregato solo sui casi congelati e rimasti uguali."""
+    casi = [_caso_cat(i, f"movimento {i}", "OTHER") for i in ("a", "b", "c", "e")]
+    congelato = {c["id"]: impronta(c) for c in casi}
+    prima = esiti_dei_casi(casi, falliti={"c"})
+    # oggi: «b» ha cambiato risposta attesa con lo stesso id, «d» è un caso nuovo che fallisce,
+    # ed «e» è caduto per un errore del fornitore
+    riscritto = {**casi[1], "expected": {"category": "GROCERIES"}}
+    oggi = [casi[0], riscritto, casi[2], _caso_cat("d", "nuovo", "OTHER"), casi[3]]
+    adesso = esiti_dei_casi(oggi, falliti={"a", "d", "e"}, errori=frozenset({"e"}))
+    c = confronta("categorize", prima, adesso, congelato)
+    assert (c.peggiorati, c.migliorati) == (["a"], ["c"])  # «e» non è un peggioramento
+    assert c.fuori == ["b", "d", "e"]  # riscritto, nuovo e caduto: non si confrontano
+    assert c.usciti == ["b"]  # il congelato riscritto non vale più, e il rapporto lo dice
+    # sui due congelati rimasti uguali, uno giusto prima e uno adesso: niente è peggiorato.
+    # L'aggregato intero direbbe 3/4 e poi 2/5, un peggioramento che è solo il metro più lungo
+    assert (c.congelati, c.giusti_prima, c.giusti_adesso) == (2, 1, 1)

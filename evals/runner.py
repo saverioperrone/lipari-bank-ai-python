@@ -14,6 +14,14 @@ import instructor
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
+from evals.confronto import (
+    CONGELATO,
+    carica,
+    confronta,
+    esiti_dei_casi,
+    rapporto_confronto,
+    salva,
+)
 from src.agents.deps import crea_deps
 from src.agents.loop import RunResult, costo_chiamata, run_agent
 from src.agents.prompts import AGENT_SYSTEM
@@ -296,6 +304,46 @@ def rapporto(risultati: list[Metriche], soglie: dict[str, float]) -> str:
     return "\n".join(righe)
 
 
+# ---------------------------------------------------------------- estensione 3: il confronto
+# L'ultima esecuzione, caso per caso. È una misura che si rigenera: sta in docs/eval/, fuori da git
+PRECEDENTE = Path("docs/eval/esiti_precedenti.json")
+DATASET_DI = {
+    "categorize": "categorize.jsonl",
+    "advice": "advice.jsonl",
+    "traiettorie": "agent_traiettorie.jsonl",
+}
+
+
+def _caduti(m: Metriche) -> frozenset[str]:
+    """I casi che un'eccezione ha fermato: le tre forme che i misuratori danno all'errore."""
+    return frozenset(
+        f["id"]
+        for f in m.fallimenti
+        if "errore" in f or str(f.get("ottenuto", "")).startswith("ERRORE")
+    )
+
+
+def confronta_con_la_precedente(risultati: list[Metriche], precedente: Path) -> str:
+    """Confronta, per id, gli esiti di oggi con quelli dell'esecuzione prima, e li salva."""
+    adesso = {
+        m.nome: esiti_dei_casi(
+            leggi(DATASETS / DATASET_DI[m.nome]), {f["id"] for f in m.fallimenti}, _caduti(m)
+        )
+        for m in risultati
+    }
+    prima = carica(precedente)
+    if prima is None:
+        testo = f"confronto: nessuna esecuzione precedente in {precedente}, salvo questa"
+    else:
+        congelato: dict[str, str] = json.loads(CONGELATO.read_text(encoding="utf-8"))
+        confronti = [
+            confronta(n, prima["esiti"].get(n, {}), e, congelato) for n, e in adesso.items()
+        ]
+        testo = rapporto_confronto(confronti, prima["quando"], adesso)
+    salva(precedente, adesso)  # dopo il confronto: se il confronto cade, la precedente resta
+    return testo
+
+
 async def main() -> int:
     if isinstance(sys.stdout, io.TextIOWrapper):
         # le note dei casi le scrivi tu, e possono contenere qualunque carattere: uno che la
@@ -333,6 +381,8 @@ async def main() -> int:
         )
     )
     print(rapporto(risultati, SOGLIE))
+    # estensione 3: gli esiti caso per caso, accanto a quelli dell'esecuzione precedente
+    print(await asyncio.to_thread(confronta_con_la_precedente, risultati, PRECEDENTE))
     passato = cancello(risultati, SOGLIE)
     print("GATE:", "passato" if passato else "NON passato")
     return 0 if passato else 1
