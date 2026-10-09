@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import cast
 
 from openai.types.chat import ChatCompletionMessageParam
@@ -12,23 +13,25 @@ from src.llm.ollama_provider import OllamaProvider
 from src.llm.openai_provider import OpenAIProvider
 from src.llm.types import Message
 from src.observability.cost_tracker import CostTracker
+from src.observability.ledger import CostLedger
 from src.types.chat import ChatRequest, ChatResponse
 
 
 class ChatService:
     def __init__(
-        self, session: AsyncSession, llm: LLMProvider, system_prompt: str, daily_budget_eur: float
+        self, session: AsyncSession, llm: LLMProvider, system_prompt: str, daily_budget_eur: Decimal
     ) -> None:
         self.session = session
         self.repo = ChatRepository(session)
         self.llm = llm
         self.system_prompt = system_prompt
-        self.cost_tracker = CostTracker(session, daily_budget_eur)
+        # Giorno 9: il tracker legge il registro, e si costruisce sul repository
+        self.cost_tracker = CostTracker(self.repo, daily_budget_eur)
 
     async def chat(self, req: ChatRequest, user_id: str) -> ChatResponse:
         # Prima di qualunque scrittura e prima di spendere: se il tetto
         # giornaliero e' gia' stato raggiunto, RateLimitError diventa un 429.
-        await self.cost_tracker.check_budget()
+        await self.cost_tracker.verifica()
 
         if req.session_id != "new":
             chat = await self.repo.find_session(req.session_id)
@@ -59,8 +62,15 @@ class ChatService:
             cost_eur=llm_response.cost_eur,
             model_used=llm_response.model,
         )
+        CostLedger(self.session).aggiungi(  # Giorno 9: il costo anche nel registro
+            endpoint="chat",
+            username=chat.user_id,
+            model=llm_response.model,
+            tokens=llm_response.tokens_used,
+            cost_eur=Decimal(str(llm_response.cost_eur)),  # qui LLMResponse.cost_eur è un float
+        )
 
-        await self.session.commit()
+        await self.session.commit()  # una volta, a lavoro finito: le tre scritture valgono insieme
 
         return ChatResponse(
             session_id=chat.id,
@@ -79,7 +89,7 @@ class ChatService:
         partirebbero solo alla prima lettura, quando lo `StreamingResponse` ha gia'
         mandato il 200, e il client riceverebbe una risposta vuota.
         """
-        await self.cost_tracker.check_budget()
+        await self.cost_tracker.verifica()
 
         if req.session_id != "new":
             chat = await self.repo.find_session(req.session_id)

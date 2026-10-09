@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434/v1"
     embedding_model: str = "text-embedding-3-small"
     max_tokens_per_request: int = 2000
-    daily_budget_eur: float = 5.0
+    daily_budget_eur: Decimal = Decimal("5.00")  # il tetto di spesa del modello, al giorno
     jwt_secret: str
     soglia_approvazione_eur: Decimal = Decimal("5000")  # sopra, decide una persona
     soglia_doppia_firma_eur: Decimal = Decimal("50000")  # estensione: sopra, firmano in due

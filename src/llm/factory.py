@@ -1,3 +1,6 @@
+from functools import cache
+
+import instructor
 from openai import AsyncOpenAI
 
 from src.config import settings
@@ -57,3 +60,16 @@ def get_openai() -> AsyncOpenAI:
     if openai_client is None:
         raise AppError(503, "API_KEY_MISSING", "Manca OPENAI_API_KEY: l'agente non può partire")
     return openai_client
+
+
+@cache
+def get_instructor() -> instructor.AsyncInstructor:
+    # Il client è quello di get_openai, con la regola di build_llm_provider. Con un modello
+    # di Ollama il modo è JSON: in modo TOOLS llama3.2:3b sbaglia lo schema (G4, e rimisurato
+    # al G9: 1 categorizzazione su 2 in TOOLS, 2 su 2 in JSON)
+    modo = (
+        instructor.Mode.JSON
+        if settings.default_model.startswith(OLLAMA_PREFIXES)
+        else instructor.Mode.TOOLS
+    )
+    return instructor.from_openai(get_openai(), mode=modo)

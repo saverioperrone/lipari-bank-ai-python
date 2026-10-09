@@ -190,3 +190,21 @@ class AgentRunState(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+# ---- Giorno 9: ogni chiamata al modello, con il suo costo, in un posto solo
+
+
+class LlmCall(Base):
+    __tablename__ = "llm_calls"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=gen_uuid)
+    endpoint: Mapped[str] = mapped_column(String(32), index=True)  # "chat", "advice", "agent"
+    username: Mapped[str] = mapped_column(String(64), index=True)
+    model: Mapped[str] = mapped_column(String(64))
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_eur: Mapped[Decimal] = mapped_column(Numeric(12, 6))
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
