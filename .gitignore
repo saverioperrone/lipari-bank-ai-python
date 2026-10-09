@@ -11,3 +11,5 @@ wheels/
 .env
 # Misure rigenerabili con scripts/eval_retrieval.py
 docs/eval/
+# La copertura dei test: si rigenera con pytest --cov
+.coverage
