@@ -1,0 +1,7 @@
+# .gitleaks.toml — le regole di default, più un'eccezione dichiarata e stretta
+[extend]
+useDefault = true
+
+[allowlist]
+description = "le chiavi finte dei test: si riconoscono dal nome, non dal file in cui stanno"
+regexes = ['''sk-(ant-)?(test|prova|finta)[\w-]*''']
