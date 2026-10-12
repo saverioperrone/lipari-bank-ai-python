@@ -1,40 +1,102 @@
-# LipariBank AI
+# LipariBank AI Assistant
 
-Bootcamp Python AI v2 — Lipari Consulting.
+Bootcamp Python AI v2 — Lipari Consulting: il progetto di studio, dal Giorno 1 al Giorno 10.
 
-FastAPI backend with Pydantic Settings config, managed with uv.
+## Cosa fa
 
-## Requirements
+Un servizio per gli operatori di filiale di LipariBank. Risponde alle domande sulle procedure
+interne citando la circolare da cui prende la risposta, e a ognuno mostra solo i documenti che il
+suo ruolo può vedere. Un agente consulta i conti dei clienti nel portafoglio dell'operatore e,
+quando serve, apre una segnalazione alla Compliance, che sopra i 5.000 € aspetta la firma di un
+responsabile. I modelli girano in locale con Ollama, e la qualità si misura con gli eval.
 
-- Python 3.12+
-- uv (package manager)
+## Come si avvia
 
-## Setup
+Servono Docker con il compose (Docker Desktop su Windows e Mac), bash e Python 3 per lo smoke
+test, e circa 4 GB di disco per i modelli. Le porte 8000, 5434 e 11434 devono essere libere.
+Dalla cartella del progetto:
+
+```bash
+cp .env.example .env
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # il tuo JWT_SECRET
+```
+
+Nel `.env` c'è una riga sola da riempire: `JWT_SECRET`, con il valore appena stampato. Quello
+d'esempio non fa partire niente, di proposito. Le altre righe vanno bene così: i modelli sono di
+Ollama e le chiavi di OpenAI e Anthropic restano vuote. Poi:
+
+```bash
+docker compose up --build -d
+docker compose ps -a
+```
+
+La prima volta il servizio `modelli` scarica tre modelli: `llama3.2:3b`, `llama3.2:1b` e
+`nomic-embed-text`, circa 3,6 GB in tutto. Ci vogliono alcuni minuti, e si seguono con `docker
+compose logs -f modelli`. Quando l'api è `(healthy)`, nelle colonne SERVICE e STATUS di `docker
+compose ps -a` si legge questo:
+
+```
+SERVICE   STATUS
+api       Up 30 seconds (healthy)
+cache     Up 45 seconds (healthy)
+db        Up 45 seconds (healthy)
+migrate   Exited (0) 38 seconds ago
+modelli   Exited (0) 39 seconds ago
+ollama    Up 45 seconds (healthy)
+seed      Exited (0) 30 seconds ago
+```
+
+`migrate`, `modelli` e `seed` girano una volta ed escono con zero: lo schema, i modelli, e i dati
+di prova (tre utenti con password `bootcamp`, due clienti con i loro conti, e l'indice dei
+documenti di `data/docs/`). Il servizio `postgres`, che ha il profilo `sviluppo`, non fa parte
+del sistema e `up` non lo accende.
+
+## Come si verifica che funziona
+
+```bash
+bash scripts/smoke.sh
+```
+
+Sono sette prove, con dieci controlli, che attraversano le dieci giornate. Durano un paio di
+minuti, perché il modello gira sulla CPU. L'uscita attesa:
+
+```
+  ok  vivo
+  ok  pronto
+  ok  login di tre ruoli
+  ok  advice di Marco: risposta e riscrittura
+  ok  Giulia vede l'istruttoria
+  ok  Marco no
+  ok  agente: get_account_balance
+  ok  riscrittura dalla cache
+  ok  Marco non vede i costi
+  ok  Lucia vede i costi
+smoke: tutto a posto
+```
+
+L'API e la sua documentazione sono su http://localhost:8000/docs. Per spegnere tutto:
+`docker compose down` (i dati restano nei volumi).
+
+## Sviluppo
+
+Per lavorare sul codice con `uv run` servono anche Python 3.12 e uv. Il database dello sviluppo e
+dei test è il Postgres del profilo `sviluppo`, sulla 5433:
 
 ```bash
 uv sync
-cp .env.example .env   # then fill in real values (DB, API keys, JWT secret)
-```
-
-`uv sync` creates the virtual environment and installs all dependencies (including dev tools) from `uv.lock`.
-
-## Run
-
-```bash
+docker compose --profile sviluppo up -d postgres ollama
+docker compose stop api                     # la 8000 serve a uvicorn
+uv run alembic upgrade head
 uv run uvicorn src.main:app --reload
 ```
 
-- App: http://127.0.0.1:8000
-- Health check: http://127.0.0.1:8000/health
-- Swagger UI: http://127.0.0.1:8000/docs
-
-## Development
+I controlli, gli stessi della CI:
 
 ```bash
-uv run ruff check src      # lint
-uv run ruff format src     # format
-uv run mypy src            # type check (strict)
-uv run pytest              # tests
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy src tests evals scripts liparibank_mcp
+uv run pytest
 ```
 
 ## Project structure
@@ -42,8 +104,14 @@ uv run pytest              # tests
 ```
 src/
 ├── config.py               # Pydantic Settings, loaded from .env
-├── main.py                 # FastAPI app, middleware, exception handler, router registration
+├── main.py                 # FastAPI app, middleware, exception handler, router registration; G10: /ready e lo spegnimento
+├── cache.py                # G10: il client Redis, uno per processo, o nessuno se REDIS_URL è vuota
 ├── exceptions.py            # AppError e sottoclassi di dominio
+├── llm/
+│   ├── factory.py           # il provider dal modello; G10: l'embedder con la cache davanti
+│   ├── rewriter.py          # la riscrittura della domanda; G10: la cache su Redis, con il suo costo
+│   ├── embedding_client.py  # gli embedding, da Ollama
+│   └── embeddings.py        # G10: CachedEmbedder, gli embedding con la cache davanti
 ├── api/
 │   ├── auth.py              # POST /api/auth/login (G6)
 │   ├── chat.py              # POST /api/ai/chat: la conversazione salvata (G3), il modello (G4)
@@ -89,14 +157,25 @@ evals/                       # G9: i casi di prova, i tre misuratori e il cancel
 ├── ingest_fixtures.py       # l'indice senza passare dall'API, per la CI
 ├── runner.py                # uv run python -m evals.runner
 └── confronto.py             # l'estensione: il confronto con l'esecuzione precedente
+scripts/                     # gli script di sviluppo; dal G10 anche:
+├── seed_all.py              # il servizio seed del compose: utenti, conti, indice, idempotente
+├── smoke.sh                 # sette prove sul sistema acceso
+├── bench_cache.py           # la cache degli embedding, misurata dentro il container
+└── misura_tetti.py          # il p95 e il costo medio dell'advisor, misurati da fuori
 .github/workflows/eval.yml   # G9: l'eval in CI, solo a mano
+.github/workflows/ci.yml     # G10: segreti, qualità, test e immagine, solo a mano
+.gitleaks.toml               # G10: le regole di gitleaks, con l'eccezione delle chiavi finte
+Dockerfile                   # G10: due fasi, si costruisce con uv e si esegue senza
+.dockerignore                # G10: cosa non entra nell'immagine, a cominciare dal .env
+docker-compose.yml           # G10: il sistema intero, popolato, con un comando
 ```
 
 ## API
 
 | Metodo | Path | Descrizione |
 |---|---|---|
-| GET | `/health` | Health check |
+| GET | `/health` | Health check: il processo è vivo. Non tocca niente fuori dal processo |
+| GET | `/ready` | Il processo può servire traffico? 200 se il database risponde, 503 se no, con una parola per dipendenza: `{"status": "ready", "checks": {"database": "ok", "cache": "ok"}}`. La cache compare ma non decide (G10) |
 | POST | `/api/auth/login` | Login con form OAuth2: restituisce un access token JWT di 30 minuti (G6) |
 | POST | `/api/ai/chat` | Chat AI, a nome dell'utente del token (G6) |
 | POST | `/api/ai/categorize` | Categorizzazione di un movimento con il modello, con lo schema imposto da instructor (G4); dal G9 sotto il tetto di spesa del giorno, con una riga nel registro dei costi |
@@ -119,7 +198,7 @@ da quale passaggio viene ogni affermazione, e quando la risposta non c'e' lo dic
 ### Farlo girare
 
 ```bash
-docker compose up -d                       # Postgres con pgvector, e Ollama
+docker compose --profile sviluppo up -d postgres ollama   # dal G10: solo Postgres e Ollama
 docker exec ollama ollama pull llama3.2:3b
 docker exec ollama ollama pull nomic-embed-text
 uv run alembic upgrade head
@@ -224,7 +303,7 @@ il diritto di sapere cosa è stato cercato al posto suo.
 ### Farlo girare
 
 ```bash
-docker compose up -d                        # Postgres con pgvector, e Ollama
+docker compose --profile sviluppo up -d postgres ollama   # dal G10: solo Postgres e Ollama
 uv sync
 uv run alembic upgrade head
 uv run python -m scripts.seed_users         # Marco, Giulia, Lucia: password «bootcamp»
@@ -322,6 +401,11 @@ riscritture sbagliate di un modello non deterministico — «entro quando?» div
 domanda sul Venezuela e resta così finché il processo vive — e l'unica difesa è non
 salvare i ripieghi.
 
+Dal Giorno 10 il deposito è Redis, condiviso fra i worker, e la chiave porta l'impronta del
+prompt al posto del prompt intero: la proprietà è la stessa, e il test dell'estensione la prova
+su un Redis finto. Una riscrittura sbagliata resta in cache un'ora, il TTL, non più finché il
+processo vive. Senza Redis, con `uv run`, la cache resta quella del processo.
+
 ### La demo di due minuti
 
 ```bash
@@ -373,7 +457,7 @@ argomento dove scriverne un altro.
 ### Farlo girare
 
 ```bash
-docker compose up -d
+docker compose --profile sviluppo up -d postgres ollama   # dal G10: solo Postgres e Ollama
 uv sync
 uv run alembic upgrade head                 # le tre tabelle dei conti e compliance_alerts
 uv run python -m scripts.seed_users         # Marco, Giulia, Lucia: password «bootcamp»
@@ -581,7 +665,7 @@ esposti con il protocollo MCP, a chi presenta un token firmato.
 ### Farlo girare
 
 ```bash
-docker compose up -d
+docker compose --profile sviluppo up -d postgres ollama   # dal G10: solo Postgres e Ollama
 uv sync                                     # da oggi anche fastmcp 4.0.10
 uv run alembic upgrade head                 # la tabella agent_runs
 uv run uvicorn src.main:app                 # in un altro terminale
@@ -796,7 +880,7 @@ I log sono righe JSON, con il `request_id` della richiesta.
 ### Farlo girare
 
 ```bash
-docker compose up -d
+docker compose --profile sviluppo up -d postgres ollama   # dal G10: solo Postgres e Ollama
 uv sync                                     # da oggi anche pytest-cov
 uv run alembic upgrade head                 # la tabella llm_calls
 uv run python -m scripts.seed_accounts      # i clienti del Giorno 3, se non ci sono già
@@ -1036,6 +1120,256 @@ review L4.
 I rilievi sul codice stanno in `docs/ai-review/G9.md`, la review L4 di `src/agents/` in
 `docs/ai-review/L4_2026-10-08.md`, gli esercizi sui prompt in `docs/prompting-clinic/G9.md`, i tre
 prompt di vibe coding in `docs/vibe-coding/G9.md`.
+
+## Giorno 10 — Produzione e consegna
+
+Da oggi il sistema parte con un comando, da un clone pulito, e già popolato: database, Redis,
+Ollama, lo schema, i modelli, gli utenti, i conti e l'indice dei documenti. L'immagine si
+costruisce in due fasi, e gira senza uv e con un utente che non è root. Le tre cache che con due
+worker non possono più stare nel processo stanno in Redis: le riscritture, gli embedding e i
+contatori del limite di richieste. Se Redis si spegne, il sistema risponde lo stesso. Le sonde
+sono due, `/health` e `/ready`, e lo spegnimento aspetta le richieste in corso. E la commessa
+della direzione: il p95 dell'advisor scende da 23,24 a circa 9,5 secondi, con un modello più
+piccolo per la risposta.
+
+### Farlo girare
+
+```bash
+cp .env.example .env                        # e il tuo JWT_SECRET: vedi «Come si avvia», in testa
+docker compose up --build -d                # il sistema intero; la prima volta scarica i modelli
+docker compose ps -a                        # migrate, modelli e seed escono con zero
+bash scripts/smoke.sh                       # sette prove sul sistema acceso
+docker compose exec api python -m scripts.bench_cache     # la cache degli embedding
+uv run python -m scripts.misura_tetti --salva              # la partenza, prima di toccare niente
+uv run python -m scripts.misura_tetti                      # dopo: il confronto con i tetti
+DATABASE_URL=postgresql+asyncpg://lipari:lipari@127.0.0.1:5434/lipari_ai uv run python -m evals.runner
+```
+
+Il runner va puntato al database del compose, sulla 5434. Con il `.env` di `uv run`
+misurerebbe il Postgres dello sviluppo e dei test, con il suo indice. La consegna scrive 5433,
+ma qui la 5433 è quella dello sviluppo, perché la 5432 è occupata da un altro progetto. E si
+scrive `127.0.0.1`, non `localhost`, per la ragione spiegata in `.env.example`. Le misure e il
+runner usano Ollama, e vanno lanciati uno alla volta, senza altre sessioni che lo usano:
+insieme si rubano il tempo e falsano i numeri. Per i test serve il Postgres dello sviluppo:
+`docker compose --profile sviluppo up -d postgres`, poi `uv run pytest`.
+
+La cache degli embedding, sui 46 passaggi del corpus: 6,24 s a cache vuota, 0,01 s a cache
+piena, costo 0 € perché il modello degli embedding è locale. Il 100% della seconda passata è un
+caso costruito: sono gli stessi passaggi appena calcolati. L'immagine pesa 102 MB compressi
+(486 MB su disco), gira come `lipari`, e dentro non ci sono `tests/`, `.env` e uv.
+
+### Le prove di «Come si vede che è fatta»
+
+| Prova | Come | Risultato |
+|---|---|---|
+| La prova del collega | Un agente separato, che non aveva mai visto il progetto, ha eseguito «Come si avvia» e «Come si verifica che funziona» alla lettera, senza aiuto, da una copia pulita del progetto e con i volumi vuoti | Non si è mai bloccato. In 7 minuti: 166 s per il primo `up`, compreso il download dei modelli, e 93 s di smoke test, finito con «smoke: tutto a posto». Ha trovato tre frasi che non corrispondevano a quello che vedeva, e le ho corrette: i modelli scaricati sono tre e non due, le colonne di `docker compose ps -a` non erano quelle mostrate, e le sette prove dello smoke test fanno dieci controlli |
+| Due ruoli, la stessa domanda, insieme, con la cache accesa | Marco e Giulia chiedono «Cosa non si comunica al cliente sulle istruttorie in corso?» nello stesso istante, con Redis appena riavviato | Stessa riscrittura, risposte diverse. Marco riceve la circolare 09, pubblica: la segnalazione, gli accertamenti. Giulia riceve il documento riservato: l'istruttoria. Arrivate insieme, le due richieste pagano entrambe la riscrittura (2,9 e 1,7 s). Rifatta da Giulia, la riscrittura viene dalla cache, quella condivisa con Marco, e la sua risposta non cambia |
+| Il database spento | `docker compose stop db`, e le due sonde | `/health` 200, `/ready` 503 con `"database":"ko"`. Riacceso il database, `/ready` torna 200 da sé in circa un secondo |
+| Redis spento | `docker compose stop cache`, e la stessa domanda due volte | `/ready` 200 con `"cache":"ko"`, e le risposte arrivano: in 16,1 e 12,1 s, contro 7,5 e 6,5 con Redis acceso |
+| L'API fermata mentre l'agente risponde | `docker compose stop api` tre secondi dopo una richiesta a `/agent` | Il client riceve la risposta intera: 200, dopo 22,4 s. Lo stop dura 19,9 s, cioè il tempo che mancava alla richiesta, non i 30 del `--graceful-timeout` |
+| Il corpo di `/ready` letto da fuori | con il database spento | 503 e 62 byte: `{"status":"not_ready","checks":{"database":"ko","cache":"ok"}}`. Niente host, utente o messaggio d'errore. Il dettaglio sta nel log, nella riga `readiness_database_ko` con lo stesso `request_id` |
+
+La cache delle riscritture non dipende da chi chiede, e non deve dipenderne. La riscrittura
+trasforma solo la domanda, e il ruolo entra dopo, nel WHERE del recupero: due ruoli con la stessa
+domanda cercano con la stessa frase e trovano passaggi diversi. Una cache delle risposte, la
+leva 2, il ruolo dovrebbe averlo nella chiave.
+
+Lo spegnimento: `--graceful-timeout 30` e `stop_grace_period: 40s`, gli stessi valori del
+blueprint, ma scelti sulle durate vere. Ho misurato le 15 domande delle traiettorie del Giorno 9,
+passando dall'API: l'agente risponde in 13,7 s di mediana e in 25,5 al massimo. L'advisor sta
+sotto i 30 s in tutte le 60 risposte di una misura, e in 55 su 60 nell'altra. Una risposta
+più lunga viene tagliata, e il client non riceve niente. Un run dell'agente tagliato si può
+rifare: la segnalazione ha la sua chiave di idempotenza.
+
+### La misura: dove va il tempo
+
+| Misura di partenza | p95 | |
+|---|---|---|
+| prima | 38,45 s | non vale: nei suoi primi 14 minuti un altro processo sul PC ha usato Ollama, con 91 richieste. Era un'esecuzione del runner degli eval, finita alle 12:57 UTC |
+| seconda | 30,02 s | pulita; 3 ripieghi su 59, cioè risposte oltre i 30 s concessi alla generazione |
+| terza, la partenza salvata | 23,24 s | pulita; nessun ripiego |
+
+Fra le due misure pulite ci sono 6,8 s di rumore: un miglioramento più piccolo non è un
+miglioramento. E la seconda misura, sullo stesso sistema, per `misura_tetti` «rispettava i
+tetti». Il costo è zero, e zero resta sotto il 70% di zero.
+
+Le righe `advice_completata` della partenza dicono dove va il tempo. La generazione della
+risposta ne prende il 94%: 12,00 s di media, 23,26 di p95. La riscrittura, quando non è in
+cache, prende 1,8 s di media. Embedding e recupero, meno di un decimo di secondo.
+
+### La decisione: il tempo
+
+**Tre righe.** Ho scelto il tempo, per i dieci consulenti che hanno un cliente al telefono:
+23 secondi di attesa al 95° percentile sono un cliente che aspetta. La scelta che non ho fatto,
+il costo, qui non avrebbe spostato niente: con Ollama in locale ogni risposta costa 0 €, e il suo
+tetto si rispetta senza fare niente. Con un modello a pagamento scegliere il tempo vorrebbe dire
+non risparmiare, e chi paga resterebbe con la bolletta di oggi.
+
+### La leva: un modello più piccolo per la risposta
+
+`ADVICE_MODEL=llama3.2:1b`: la risposta dell'advisor la scrive un modello da 1B. La riscrittura,
+la chat, la categorizzazione e l'agente restano su `DEFAULT_MODEL`, `llama3.2:3b`. Se la
+variabile è vuota, l'advisor usa il modello di sempre, e il servizio `modelli` del compose scarica
+anche quello piccolo. Il codice sta in `get_llm_advisor` (`src/api/advice.py`) e in un campo di
+`Settings`. Il test della proprietà è
+`test_la_risposta_dell_advisor_usa_il_modello_piccolo_e_la_riscrittura_no`.
+
+| | Prima | Dopo |
+|---|---|---|
+| Il tempo: p95 dell'advisor, con `misura_tetti` | 23,24 s | 9,94 s e 9,08 s, in due misure |
+| Il costo medio per risposta | 0 € | 0 € |
+| Il runner del Giorno 9 | categorize 0,78, advice 0,83, traiettorie 0,40: passato | gli stessi tre numeri: passato |
+| La generazione, dai log | 12,00 s di media, p95 23,26 | 4,58 s di media, p95 7,39 |
+
+Il tetto, 17,43 s, è rispettato con un margine molto più largo del rumore, e `misura_tetti` esce
+con zero. Ma la leva tocca solo la risposta, e il runner del Giorno 9 la risposta non la misura.
+Il suo advice misura il recupero, riscrittura compresa, e la riscrittura resta sul 3b. Per questo
+ho guardato le 30 domande del dataset caso per caso, con tre modelli sull'advisor:
+
+| Advisor | Mediana | Risposte con citazione | Citano il documento atteso | Contengono la cifra attesa | Rifiuti |
+|---|---|---|---|---|---|
+| `llama3.2:3b`, prima | 15,2 s | 15 su 30 | 12 su 27 | 7 su 14 | 10 |
+| `llama3.2:1b`, la leva | 6,3 s | 1 su 30 | 1 su 27 | 4 su 14 | 13 |
+| `qwen2.5:1.5b`, scartato | 7,2 s | 6 su 30 | 2 su 27 | 7 su 14 | 4 |
+
+«Contengono la cifra attesa» conta i 14 casi in cui la nota del dataset dà una cifra (8,90 per
+cento, 15.000 euro, 30 giorni…), e controlla che la cifra compaia nella risposta. È una misura
+grezza, ma dice se la risposta è giusta, non soltanto se cita.
+
+È la trappola che la consegna descrive, e qui è grande. Il modello da 1B a volte usa il passaggio
+giusto: a Giulia risponde con la frase del documento riservato. Però non scrive i `[fonte-N]`:
+delle 12 domande che con il 3b citavano il documento giusto, con l'1b non lo cita più nessuna. E
+sbaglia di più nel merito. L'unica risposta che cita è sbagliata: «Il tasso del fido per un
+cliente storico è del 10% [fonte-1]», mentre la circolare 22 dice 8,90%. Alle domande bancarie
+senza risposta nei documenti, come quella sul mutuo a tasso fisso, risponde a memoria invece di
+dire che non sa. Il runner resta verde.
+
+Cosa ho scartato:
+- **la leva 1**, la riscrittura solo quando serve: la riscrittura è il 6% del tempo, e nella
+  misura metà delle domande la trova già in cache;
+- **la leva 2**, la cache delle risposte: `misura_tetti` fa ogni domanda due volte, e la cache
+  renderebbe istantanea la seconda, ma il p95 resta nella metà lenta; il costo, poi, è già zero;
+- **la leva 4**, meno contesto: toglie una parte della lettura dei passaggi, dentro una
+  generazione che è il 94% del tempo. E il K del runner dovrebbe scendere con il `top_k`, con
+  l'advice oggi a 0,83 e la soglia a 0,80;
+- **`qwen2.5:1.5b`**: più veloce del 3b, ma cita in 6 risposte su 30 e sbaglia nel merito. Al
+  bonifico SEPA online attribuisce la commissione dell'extra-SEPA, 12,50 € più lo 0,15%, mentre
+  la circolare dice che sul SEPA non c'è nessuna commissione.
+
+**Tre righe a difesa del disegno.** Ho scelto un modello più piccolo per la sola risposta, perché
+la generazione è il 94% del tempo: il p95 scende da 23,24 a circa 9,5 secondi, con un rumore di
+misura di 7. Ho scartato la cache delle risposte e la riscrittura condizionale, che non toccano
+la parte che pesa, e `qwen2.5:1.5b`, che sbaglia nel merito. Il prezzo l'ho pagato nelle fonti e
+nel merito: con l'1b le risposte con la citazione passano da 15 a 1 su 30, quelle con la cifra
+giusta da 7 a 4 su 14. Il runner del Giorno 9 non vede né le une né le altre, perché misura il
+recupero.
+
+### La demo di cinque minuti
+
+Dal sistema acceso con `docker compose up`, le quattro domande della difesa. Le ho provate tutte
+sul sistema con la leva accesa.
+
+```bash
+login() { curl -s -X POST localhost:8000/api/auth/login -d "username=$1&password=bootcamp" \
+  | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])"; }
+MARCO="Authorization: Bearer $(login mbianchi)"
+GIULIA="Authorization: Bearer $(login grossi)"
+J="Content-Type: application/json"
+
+# 1. una domanda sui documenti
+curl -s -X POST localhost:8000/api/ai/advice -H "$MARCO" -H "$J" \
+  -d '{"question":"Qual e il limite giornaliero dei bonifici esteri da home banking?"}'
+# «15.000 euro», giusto, in pochi secondi, e "citations": [] — il prezzo della leva, dal vivo
+
+# 2. una domanda sui conti, che attiva uno strumento
+curl -s -X POST localhost:8000/api/ai/agent -H "$MARCO" -H "$J" \
+  -d '{"message":"qual e il saldo del conto IT60X0542811101000000123?"}'
+# tool_calls ["get_account_balance"], e il saldo vero del conto
+
+# 3. una domanda che chiede la firma di un umano
+R=$(curl -s -X POST localhost:8000/api/ai/agent -H "$MARCO" -H "$J" \
+  -d '{"message":"apri una segnalazione di compliance sul conto IT60X0542811101000000123: il cliente vuole fare un bonifico di 25.000 euro verso il Venezuela"}')
+echo "$R"                                    # stopped_by "awaiting_approval": niente scritto
+RUN=$(echo "$R" | python -c "import sys,json;print(json.load(sys.stdin)['run_id'])")
+curl -s localhost:8000/api/ai/agent/$RUN -H "$GIULIA"            # cosa si sta approvando, e chi lo chiede
+curl -s -X POST localhost:8000/api/ai/agent/$RUN/approve -H "$GIULIA"
+# il run riprende al passo 2: apri_segnalazione_compliance, e la segnalazione c'è
+
+# 4. una domanda a cui il sistema risponde che non sa
+curl -s -X POST localhost:8000/api/ai/advice -H "$MARCO" -H "$J" \
+  -d '{"question":"Che tempo fa domani a Milano?"}'
+# «Non ho trovato informazioni sufficienti nei documenti disponibili…», nessuna citazione
+```
+
+Le domande sono senza accenti: il curl di Git Bash su Windows li spedisce in una codifica che il
+server non legge. Nelle prove la prima ha risposto «15.000 euro» 3 volte su 3, e la quarta ha dato
+il rifiuto 3 volte su 3. Ho scelto per la quarta una domanda fuori dal dominio: su una domanda
+bancaria senza risposta nei documenti, il modello piccolo risponde a memoria (vedi sopra).
+Rifatta lo stesso giorno, la terza non apre una seconda pratica, perché la segnalazione ha la sua
+chiave di idempotenza.
+
+### Lo smoke test, e cosa ho adattato
+
+Lo smoke test del blueprint presuppone un modello di OpenAI. Con quelli di Ollama quattro prove
+erano da adattare, e lo dico qui:
+- la domanda informale di Marco è «bonifico extra sepa tempi» e non «ven ok?»: a «ven ok?»
+  `llama3.2:3b` rispondeva con il rifiuto;
+- l'agente risponde a una domanda con l'IBAN, come nella demo del Giorno 7: `llama3.2:3b` usa un
+  tool per domanda, e i due tool in fila del blueprint non li fa;
+- il rapporto di Lucia si controlla dalle chiamate registrate, non dagli euro: con Ollama il
+  costo è zero;
+- con la leva il modello piccolo non scrive i `[fonte-N]`, quindi le prove 2 e 3 guardano la
+  risposta e non le citazioni. Marco deve ricevere una risposta che non sia il rifiuto. Giulia
+  deve vedere l'istruttoria e Marco no: la parola «istruttoria» compare solo nel documento
+  riservato, ed è nella risposta di Giulia in 9 prove su 9 e in quella di Marco in 0 su 9.
+
+### Le deviazioni dal blueprint
+
+- Ollama sta nel compose, al posto della chiave di OpenAI, con il servizio `modelli` che scarica
+  quello che manca. Il seed non controlla la chiave di OpenAI: gli embedding sono di Ollama, e
+  la chiave non serve.
+- Il database del compose è sulla 5434, quello dello sviluppo e dei test sulla 5433. Il DSN usa
+  `127.0.0.1`: con la porta pubblicata solo su IPv4, `localhost` su Windows perde 2 s a ogni
+  connessione, e la suite dei test passa da 19 a 105 s.
+- `EmbeddingClient` riceve il client e il modello, come nel Code Blueprint del Giorno 5. Il client
+  della factory è `_ollama()` invece di `_openai()`.
+- La riscrittura tiene le scelte del Giorno 6: la domanda normalizzata nella chiave (estensione
+  C), il prompt v2, la temperatura 0 e l'istanza unica. Con il blueprint, che crea un riscrittore
+  a ogni richiesta, senza Redis la cache del processo resterebbe sempre vuota.
+- `bench_cache.py` conta 0 € per gli embedding, che sono locali.
+- `ci.yml` parte solo a mano, con un tetto di 15 minuti per job, come `eval.yml`. Quattro script
+  dei giorni scorsi sono stati formattati, perché la CI controlla tutto il progetto.
+- Nel `.dockerignore` il commento di `**/*.pyc` sta su una riga sua: a metà riga Docker lo
+  leggerebbe come parte del pattern.
+
+### I test
+
+86, cioè i 72 dei giorni scorsi e i 14 di oggi: i 13 del blueprint e quello della leva. Rispetto
+al blueprint: la dimensione dei vettori è `EMBEDDING_DIM`, 768, e non 1536; il test del seed non
+ha la metà sul segnaposto della chiave; in `tests/finti.py` ci sono `Registro` (dal Giorno 4),
+`gestore_embedding` e `ModelloFisso.ricevuti` (dal Giorno 5). Il test dell'estensione C del Giorno
+6 ora gira su un Redis finto. Il `conftest.py` della radice tiene vuota `ADVICE_MODEL`, così
+nessun test chiama Ollama.
+
+### Cosa resta da sapere
+
+- In produzione questa leva non la accenderei. Rispetta il tetto, ma l'advisor risponde senza
+  fonte, e a volte con la cifra sbagliata; i cancelli del Giorno 9 non se ne accorgono, perché
+  non misurano la risposta. Per tornare al modello di prima basta `ADVICE_MODEL=` nel `.env` e
+  `docker compose up -d`.
+- Ollama serve una richiesta alla volta (`OLLAMA_NUM_PARALLEL=1`). Sei domande arrivate
+  insieme finiscono fra 12,6 e 42,0 s, e le ultime due escono come ripiego, perché in coda
+  superano i 30 s della generazione. Trenta operatori il lunedì mattina farebbero una coda di
+  minuti, e quasi tutte le risposte sarebbero ripieghi.
+- Con Redis spento una risposta costa 6–9 s in più. Dentro Docker, il nome di un container
+  spento si risolve in un errore dopo 3,97 s, e una richiesta passa da Redis più volte.
+- Dopo un riavvio di Docker torna su solo l'api, l'unica con `restart: unless-stopped`: risulta
+  `healthy`, ma `/ready` risponde 503 finché non si lancia `docker compose up -d`. È il rilievo
+  che non correggo in `docs/ai-review/G10.md`.
+- `ollama/ollama:latest` è un tag mobile.
+- Le due misure di partenza pulite differiscono di 6,8 s: sulla CPU il tempo di Ollama varia
+  molto da un giro all'altro.
+- Il workflow `ci.yml` non è mai girato, come `eval.yml`.
 
 ## Decisione di design — response_model esplicito vs return type hint
 
