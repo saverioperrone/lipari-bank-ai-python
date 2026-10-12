@@ -1,16 +1,53 @@
-version: '3.8'
-services:
-  postgres:
-    image: pgvector/pgvector:pg16  # PostgreSQL 16 + pgvector preinstallato
-    environment:
-      POSTGRES_USER: lipari
-      POSTGRES_PASSWORD: lipari
-      POSTGRES_DB: lipari_ai
-    ports:
-      - "5433:5432"
-    volumes:
-      - lipari-ai-data:/var/lib/postgresql/data
+# docker-compose.yml — un comando, e il sistema parte popolato
 
+# Ciò che hanno in comune i tre servizi fatti con la tua immagine: la stessa immagine, le stesse
+# variabili. I segreti arrivano dal .env, e quelli senza cui non si parte hanno il `:?`. La chiave
+# del modello no: qui i modelli sono di Ollama, e senza chiave il sistema parte lo stesso
+x-app: &app
+  image: lipari-bank-ai:dev
+  pull_policy: never   # la costruisce `api`, qui sotto: non si scarica
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lipari}:${POSTGRES_PASSWORD:?serve POSTGRES_PASSWORD nel .env}@db:5432/${POSTGRES_DB:-lipari_ai}
+    REDIS_URL: redis://cache:6379/0
+    JWT_SECRET: ${JWT_SECRET:?serve JWT_SECRET nel .env}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4o-mini}
+    DAILY_BUDGET_EUR: ${DAILY_BUDGET_EUR:-5.00}
+    # Ollama: il servizio `ollama` qui sotto, al posto del localhost che il .env usa con uv run
+    OLLAMA_BASE_URL: http://ollama:11434/v1
+    EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lipari}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?serve POSTGRES_PASSWORD nel .env}
+      POSTGRES_DB: ${POSTGRES_DB:-lipari_ai}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lipari} -d ${POSTGRES_DB:-lipari_ai}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:5434:5432"   # solo dal tuo host; la 5433 resta al Postgres dei test, qui sotto
+
+  cache:
+    image: redis:7-alpine
+    # niente persistenza, e un tetto di memoria con sfratto: dentro c'è solo ciò che si ricalcola
+    command: ["redis-server", "--save", "", "--appendonly", "no",
+              "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Il modello e gli embedding, in locale: è il posto che nel Code Blueprint ha la chiave di
+  # OpenAI. Lo stesso servizio risponde anche a uv run, sulla 11434
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -18,7 +55,83 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Su un clone pulito il volume di Ollama è vuoto, e senza il modello degli embedding il seed non
+  # costruisce l'indice: si scarica quello che manca, e si esce. Il modello della chat solo se è
+  # di Ollama, con la regola dei prefissi della factory
+  modelli:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: ollama:11434
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4o-mini}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        scarica() { ollama show "$$1" > /dev/null 2>&1 || ollama pull "$$1"; }
+        scarica "$$EMBEDDING_MODEL"
+        case "$$DEFAULT_MODEL" in llama*|qwen*|mistral*|gemma*|phi*) scarica "$$DEFAULT_MODEL" ;; esac
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  seed:
+    <<: *app
+    command: ["python", "-m", "scripts.seed_all"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      cache:
+        condition: service_healthy
+      modelli:
+        condition: service_completed_successfully
+
+  api:
+    <<: *app
+    build: .   # una build sola: tre in parallelo si contendono il nome dell'immagine
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      cache:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    stop_grace_period: 40s       # più del --graceful-timeout: altrimenti SIGKILL dopo 10 secondi
+    deploy:
+      resources:
+        limits:
+          memory: 1g             # il primo processo che cresce non si prende la macchina
+
+  # Il Postgres dello sviluppo con uv run e dei test, quello del Giorno 3: stesso nome, stessa
+  # porta, stesso volume, quindi gli stessi dati. Non fa parte del sistema, e `up` non lo accende:
+  # docker compose --profile sviluppo up -d postgres
+  postgres:
+    image: pgvector/pgvector:pg16
+    profiles: ["sviluppo"]
+    environment:
+      POSTGRES_USER: lipari
+      POSTGRES_PASSWORD: lipari
+      POSTGRES_DB: lipari_ai
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - lipari-ai-data:/var/lib/postgresql/data
 
 volumes:
-  lipari-ai-data:
-  ollama_data:
+  pgdata:
+  lipari-ai-data:   # il volume del Giorno 3: tolto dal file, i suoi dati resterebbero orfani
+  ollama_data:      # i modelli già scaricati: tolto dal file, si riscaricherebbero

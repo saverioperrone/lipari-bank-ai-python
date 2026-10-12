@@ -10,8 +10,10 @@ from alembic import command
 # Dal Giorno 3 i test parlano con un database vero: quello di test, mai quello di sviluppo.
 # Qui non c'è setdefault: un DATABASE_URL rimasto nell'ambiente porterebbe i test a svuotare
 # il database su cui lavori.
+# 127.0.0.1 e non localhost: dal Giorno 10 il compose pubblica la porta solo su IPv4, e su Windows
+# localhost prova prima ::1, dove non risponde nessuno, e ogni connessione perde due secondi
 os.environ["DATABASE_URL"] = os.environ.get(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://lipari:lipari@localhost:5433/lipari_ai_test"
+    "TEST_DATABASE_URL", "postgresql+asyncpg://lipari:lipari@127.0.0.1:5433/lipari_ai_test"
 )
 os.environ.setdefault("JWT_SECRET", "segreto-dei-test-lungo-almeno-trentadue-caratteri")
 # Dal Giorno 9: chiavi finte, anche qui senza setdefault. La tua chiave vera sta nel .env, e un test

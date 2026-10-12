@@ -1,0 +1,28 @@
+# .dockerignore — cosa NON entra nell'immagine. Si scrive prima del Dockerfile.
+
+# ambiente locale: costruito per la TUA macchina, inutile e dannoso nell'immagine
+.venv/
+# a ogni livello: senza `**/` varrebbero solo per la radice
+**/__pycache__/
+**/*.pyc
+
+# storia e strumenti
+.git/
+.github/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# segreti: le righe che contano
+.env
+.env.*
+!.env.example
+
+# cose che al runtime non servono
+tests/
+evals/datasets/
+evals/judge/
+docs/
+client/
+*.md
