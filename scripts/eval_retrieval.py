@@ -30,13 +30,13 @@ from src.llm.rewriter import QueryRewriter
 from src.services.retrieval_service import SOGLIA_PREDEFINITA, RetrievalService
 
 USCITA = Path(__file__).parent.parent / "docs" / "eval"
-PRIMI = 5   # quanti passaggi finiscono nel contesto, come in RAGService
+PRIMI = 5  # quanti passaggi finiscono nel contesto, come in RAGService
 
 
 class Domanda(BaseModel):
     testo: str
-    atteso: str      # il document_id che contiene la risposta
-    nota: str        # dove sta, per poter rifare la verifica a mano
+    atteso: str  # il document_id che contiene la risposta
+    nota: str  # dove sta, per poter rifare la verifica a mano
 
 
 DOMANDE: list[Domanda] = [
@@ -47,7 +47,7 @@ DOMANDE: list[Domanda] = [
     ),
     Domanda(
         testo="Da quale cifra scatta il controllo rafforzato"
-              " se il destinatario sta in un paese rischioso?",
+        " se il destinatario sta in un paese rischioso?",
         atteso="circolare-17-bonifici-estero",
         nota="par. 5 — oltre 7.500 euro",
     ),
@@ -96,7 +96,7 @@ DOMANDE: list[Domanda] = [
 
 class Esito(BaseModel):
     domanda: str
-    cercata: str     # quello che e' arrivato al recupero: la domanda, o la sua riscritta
+    cercata: str  # quello che e' arrivato al recupero: la domanda, o la sua riscritta
     atteso: str
     recuperati: list[str]
     hit_k: bool
@@ -183,9 +183,13 @@ async def main() -> None:
         top_k=PRIMI,
         soglia=SOGLIA_PREDEFINITA,
         ricerca=(
-            'ibrida' if args.ibrida else 'vettoriale + deduplica' if args.dedup
-            else 'solo vettoriale'
-        ) + (' + riscrittore' if args.riscrittore else ''),
+            "ibrida"
+            if args.ibrida
+            else "vettoriale + deduplica"
+            if args.dedup
+            else "solo vettoriale"
+        )
+        + (" + riscrittore" if args.riscrittore else ""),
         hit_at_k=sum(1 for e in esiti if e.hit_k),
         hit_at_1=sum(1 for e in esiti if e.hit_1),
         vuoti=sum(1 for e in esiti if e.vuoto),

@@ -45,13 +45,21 @@ DOMANDE = [  # (domanda, gruppo)
     ("Mostrami gli ultimi movimenti del conto principale del cliente C-10234.", "semplice"),
     ("Qual è la soglia per un bonifico verso un paese a rischio elevato?", "semplice"),
     ("Cosa devo dire al cliente quando un bonifico verso Panama va in verifica?", "semplice"),
-    ("Il saldo del conto principale del cliente C-10234 basta per un bonifico di 50.000 euro?",
-     "semplice"),
+    (
+        "Il saldo del conto principale del cliente C-10234 basta per un bonifico di 50.000 euro?",
+        "semplice",
+    ),
     ("Il cliente C-10234 ha fatto bonifici verso Panama nell'ultimo mese?", "più tool"),
-    ("Il cliente C-10234 vuole fare un bonifico di 25.000 euro verso il Venezuela dal conto "
-     "principale: posso procedere?", "più tool"),
-    ("Il cliente C-10234 vuole mandare 12.000 euro a Panama dal conto principale: va aperta "
-     "una segnalazione? Se serve, aprila.", "più tool"),
+    (
+        "Il cliente C-10234 vuole fare un bonifico di 25.000 euro verso il Venezuela dal conto "
+        "principale: posso procedere?",
+        "più tool",
+    ),
+    (
+        "Il cliente C-10234 vuole mandare 12.000 euro a Panama dal conto principale: va aperta "
+        "una segnalazione? Se serve, aprila.",
+        "più tool",
+    ),
 ]
 
 

@@ -1,6 +1,6 @@
 """I tre utenti della giornata. Script di sviluppo, si lancia a mano.
 
-    uv run python -m scripts.seed_users
+uv run python -m scripts.seed_users
 """
 
 import asyncio
@@ -25,9 +25,7 @@ async def main() -> None:
     creati = 0
     async with AsyncSessionLocal() as session:
         for username, full_name, role in UTENTI:
-            gia_presente = await session.scalar(
-                select(AppUser).where(AppUser.username == username)
-            )
+            gia_presente = await session.scalar(select(AppUser).where(AppUser.username == username))
             if gia_presente is not None:
                 print(f"   {username}: c'era già, lo lascio com'è")
                 continue
