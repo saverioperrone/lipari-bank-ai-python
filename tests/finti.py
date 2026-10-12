@@ -65,12 +65,15 @@ class ModelloEco:
 
 
 class ModelloFisso:
-    """Un modello che risponde sempre lo stesso testo, deciso dal test."""
+    """Un modello che risponde sempre lo stesso testo, deciso dal test, e ricorda cosa ha
+    ricevuto."""
 
     def __init__(self, testo: str) -> None:
         self.testo = testo
+        self.ricevuti: list[list[Message]] = []  # dal ModelloFisso del Giorno 5: serve al Giorno 10
 
     async def complete(self, messages: list[Message], max_tokens: int = 500) -> LLMResponse:
+        self.ricevuti.append(messages)
         # 100 token e 0,0001 €, come il ModelloFisso del Giorno 5: dal Giorno 9 il costo si registra
         return LLMResponse(content=self.testo, tokens_used=100, cost_eur=0.0001, model="fisso")
 
@@ -93,6 +96,38 @@ def riscrittore_spento() -> QueryRewriter:
 
 # ---- dal Giorno 4: l'SDK di OpenAI vero, con l'API finta a livello HTTP (servono al Giorno 9)
 Gestore = Callable[[httpx2.Request], httpx2.Response]
+
+
+# Registro dal Giorno 4 e gestore_embedding dal Giorno 5: servono ai test del Giorno 10
+class Registro:
+    """Le richieste arrivate al finto, con il corpo JSON già letto."""
+
+    def __init__(self) -> None:
+        self.richieste: list[dict[str, Any]] = []
+        self.percorsi: list[str] = []
+
+    def annota(self, request: httpx2.Request) -> dict[str, Any]:
+        corpo: dict[str, Any] = json.loads(request.content or b"{}")
+        self.richieste.append(corpo)
+        self.percorsi.append(request.url.path)
+        return corpo
+
+
+def gestore_embedding(r: httpx2.Request) -> httpx2.Response:
+    """L'API degli embedding, finta: un vettore per ogni testo, nell'ordine in cui arrivano."""
+    testi: list[str] = json.loads(r.content)["input"]
+    return httpx2.Response(
+        200,
+        json={
+            "object": "list",
+            "model": "text-embedding-3-small",
+            "data": [
+                {"object": "embedding", "index": i, "embedding": vettore(t)}
+                for i, t in enumerate(testi)
+            ],
+            "usage": {"prompt_tokens": 10, "total_tokens": 10},
+        },
+    )
 
 
 def openai_finto(gestore: Gestore, max_retries: int = 2) -> AsyncOpenAI:
