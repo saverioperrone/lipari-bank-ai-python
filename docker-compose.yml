@@ -17,6 +17,8 @@ x-app: &app
     # Ollama: il servizio `ollama` qui sotto, al posto del localhost che il .env usa con uv run
     OLLAMA_BASE_URL: http://ollama:11434/v1
     EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+    # la leva del Giorno 10: il modello della sola risposta dell'advisor (vuota, quello di sempre)
+    ADVICE_MODEL: ${ADVICE_MODEL:-}
 
 services:
   db:
@@ -62,21 +64,24 @@ services:
       retries: 10
 
   # Su un clone pulito il volume di Ollama è vuoto, e senza il modello degli embedding il seed non
-  # costruisce l'indice: si scarica quello che manca, e si esce. Il modello della chat solo se è
-  # di Ollama, con la regola dei prefissi della factory
+  # costruisce l'indice: si scarica quello che manca, e si esce. Il modello della chat e quello
+  # dell'advisor solo se sono di Ollama, con la regola dei prefissi della factory
   modelli:
     image: ollama/ollama:latest
     environment:
       OLLAMA_HOST: ollama:11434
       DEFAULT_MODEL: ${DEFAULT_MODEL:-gpt-4o-mini}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      ADVICE_MODEL: ${ADVICE_MODEL:-}
     entrypoint: ["sh", "-c"]
     command:
       - |
         set -e
         scarica() { ollama show "$$1" > /dev/null 2>&1 || ollama pull "$$1"; }
         scarica "$$EMBEDDING_MODEL"
-        case "$$DEFAULT_MODEL" in llama*|qwen*|mistral*|gemma*|phi*) scarica "$$DEFAULT_MODEL" ;; esac
+        for modello in "$$DEFAULT_MODEL" "$$ADVICE_MODEL"; do
+          case "$$modello" in llama*|qwen*|mistral*|gemma*|phi*) scarica "$$modello" ;; esac
+        done
     depends_on:
       ollama:
         condition: service_healthy

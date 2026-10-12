@@ -21,6 +21,9 @@ os.environ.setdefault("JWT_SECRET", "segreto-dei-test-lungo-almeno-trentadue-car
 # fattura, che no. Deve stare qui in cima, prima che l'import di src costruisca Settings.
 os.environ["OPENAI_API_KEY"] = "sk-test-mai-valida"
 os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test-mai-valida"
+# Dal Giorno 10: il modello piccolo dell'advisor, la leva, vale fuori dai test. Con ADVICE_MODEL
+# nel .env l'advisor costruirebbe un provider vero, e i test chiamerebbero Ollama invece del finto
+os.environ["ADVICE_MODEL"] = ""
 
 
 @pytest.fixture(scope="session", autouse=True)

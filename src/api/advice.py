@@ -48,6 +48,12 @@ def get_rewriter() -> QueryRewriter:
     return riscrittore
 
 
+def get_llm_advisor(llm: Annotated[LLMProvider, Depends(get_llm_provider)]) -> LLMProvider:
+    """Giorno 10, la leva: la risposta dell'advisor con ADVICE_MODEL, se c'è. Vuota, il modello
+    di sempre, quello che i test sostituiscono con i finti. La riscrittura resta sul suo."""
+    return build_llm_provider(settings.advice_model) if settings.advice_model else llm
+
+
 @dataclass
 class Deps:
     rag: RAGService
@@ -56,7 +62,7 @@ class Deps:
 async def get_deps(
     db: Annotated[AsyncSession, Depends(get_db)],
     embedder: Annotated[EmbeddingClient, Depends(get_embedder)],
-    llm: Annotated[LLMProvider, Depends(get_llm_provider)],
+    llm: Annotated[LLMProvider, Depends(get_llm_advisor)],
     rewriter: Annotated[QueryRewriter, Depends(get_rewriter)],
 ) -> Deps:
     """I servizi di /advice, da dependency: un test li sostituisce senza toccare l'endpoint."""

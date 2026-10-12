@@ -18,25 +18,25 @@ token() {
 TOK_M=$(token mbianchi); TOK_G=$(token grossi); TOK_L=$(token lverdi)
 ok "login di tre ruoli"
 
-# 2. Marco chiede come chiede davvero: risposta, citazione, riscrittura (Giorni 5 e 6). Una
-#    domanda informale che llama3.2:3b cita: a «ven ok?» risponde con il rifiuto, senza fonti
+# 2. Marco chiede come chiede davvero: risposta e riscrittura (Giorni 5 e 6), su una domanda
+#    informale. Con la leva del Giorno 10 risponde llama3.2:1b, che non scrive i [fonte-N]: si
+#    controlla che risponda, e non con il rifiuto, non che citi
 DOMANDA='{"question":"bonifico extra sepa tempi"}'
 ADV_M=$(curl -sf -X POST "$BASE/api/ai/advice" -H "Authorization: Bearer $TOK_M" \
   -H "Content-Type: application/json" -d "$DOMANDA")
-[ "$(echo "$ADV_M" | campo "len(d['citations']) > 0 and bool(d['rewritten_query'])")" = True ] \
-  && ok "advice di Marco: citazione e riscrittura" || no "advice di Marco"
+[ "$(echo "$ADV_M" | campo "bool(d['answer']) and 'Non ho trovato' not in d['answer'] and bool(d['rewritten_query'])")" = True ] \
+  && ok "advice di Marco: risposta e riscrittura" || no "advice di Marco"
 
 # 3. una domanda la cui risposta sta solo nel documento riservato (l'ACL del Giorno 6):
-#    Giulia lo cita, Marco no. Sulla stessa domanda generica, l'ordine dei passaggi potrebbe
-#    far citare a entrambi il documento pubblico, e la prova non direbbe niente
+#    Giulia lo vede, Marco no. Senza citazioni la prova guarda il contenuto: «istruttoria» sta
+#    solo nel documento riservato. A Marco risponde la circolare 09, che è pubblica
 RISERVATA='{"question":"Cosa non si comunica al cliente sulle istruttorie in corso?"}'
-citati() {
+istruttoria() {
   curl -sf -X POST "$BASE/api/ai/advice" -H "Authorization: Bearer $1" \
-    -H "Content-Type: application/json" -d "$RISERVATA" | campo "sorted({c['document_id'] for c in d['citations']})"
+    -H "Content-Type: application/json" -d "$RISERVATA" | campo "'istruttori' in d['answer'].lower()"
 }
-DOC_G=$(citati "$TOK_G"); DOC_M=$(citati "$TOK_M")
-case "$DOC_G" in *aml_controparti_venezuela*) ok "Giulia vede l'istruttoria" ;; *) no "Giulia: $DOC_G" ;; esac
-case "$DOC_M" in *aml_controparti_venezuela*) no "Marco vede l'istruttoria" ;; *) ok "Marco no" ;; esac
+[ "$(istruttoria "$TOK_G")" = True ] && ok "Giulia vede l'istruttoria" || no "Giulia non vede l'istruttoria"
+[ "$(istruttoria "$TOK_M")" = False ] && ok "Marco no" || no "Marco vede l'istruttoria"
 
 # 4. l'agente fa più di un passo, su un conto del portafoglio di Marco (Giorno 7). La domanda
 #    porta l'IBAN, come nella demo del Giorno 7: llama3.2:3b usa un tool per domanda, e con il

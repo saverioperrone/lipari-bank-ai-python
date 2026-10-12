@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     soglia_doppia_firma_eur: Decimal = Decimal("50000")  # estensione: sopra, firmano in due
     # Giorno 10: vuota vuol dire «niente Redis» — le cache restano nel processo, come in sviluppo
     redis_url: str = ""
+    # Giorno 10, la leva: il modello della sola risposta dell'advisor. Vuota, quello di sempre
+    advice_model: str = ""
 
     @field_validator("jwt_secret")
     @classmethod

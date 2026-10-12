@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import create_async_engine
 import src.main
 from scripts import misura_tetti
 from src.api.advice import get_rewriter
-from src.config import Settings
+from src.config import Settings, settings
 from src.db.models import EMBEDDING_DIM, AppUser, Customer, DocumentChunk
 from src.db.session import AsyncSessionLocal, engine
 from src.llm import factory
+from src.llm.client import LLMProvider
 from src.llm.embedding_client import EmbeddingClient
 from src.llm.embeddings import CachedEmbedder
 from src.llm.factory import get_llm_provider
@@ -232,3 +233,30 @@ def test_i_tetti_si_rispettano_con_un_numero_senza_peggiorare_l_altro() -> None:
     assert not verdetto(partenza, {"p95_s": 2.9, "costo_medio_eur": 0.0011})[0]  # costo su
     assert not verdetto(partenza, {"p95_s": 3.5, "costo_medio_eur": 0.0009})[0]  # poco
     assert misura_tetti.p95([1.0] * 19 + [10.0]) < 10.0  # un caso su venti non è il p95
+
+
+# ---------------------------------------------------------------- la leva: un modello più piccolo
+async def test_la_risposta_dell_advisor_usa_il_modello_piccolo_e_la_riscrittura_no(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La proprietà della leva: il modello di ADVICE_MODEL risponde, e solo lui. La riscrittura,
+    che decide cosa si recupera e che gli eval del Giorno 9 misurano, resta su quello di sempre."""
+    async with AsyncSessionLocal() as s:
+        await IngestService(s, embedder_finto()).ingest("bonifici_estero", PUBBLICO)
+    piccolo = ModelloFisso("Costa €15.00 [fonte-1].")
+    costruiti: list[str | None] = []
+
+    def costruisci(model: str | None = None, temperature: float = 0.3) -> LLMProvider:
+        costruiti.append(model)
+        return piccolo
+
+    monkeypatch.setattr(settings, "advice_model", "llama3.2:1b")
+    monkeypatch.setattr("src.api.advice.build_llm_provider", costruisci)
+    di_sempre = ModelloFisso("costo bonifici verso il Venezuela")
+    app.dependency_overrides[get_llm_provider] = lambda: di_sempre
+    app.dependency_overrides[get_rewriter] = lambda: QueryRewriter(di_sempre, "P")
+    async with client() as c:
+        r = await c.post("/api/ai/advice", json={"question": "ven costo?"})
+    assert r.json()["answer"] == "Costa €15.00 [fonte-1]."  # la risposta, dal modello piccolo
+    assert costruiti == ["llama3.2:1b"] and len(piccolo.ricevuti) == 1
+    assert len(di_sempre.ricevuti) == 1  # una chiamata sola: la riscrittura
