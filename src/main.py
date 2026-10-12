@@ -1,8 +1,12 @@
+import asyncio
+import logging
 import re
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Literal
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -10,13 +14,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import text
 
 from src.api import admin, advice, agent, auth, categorize, chat
+from src.cache import chiudi_redis, get_redis
 from src.config import settings
+from src.db.session import engine
 from src.exceptions import AppError
 from src.observability.json_log import configura_log, request_id
 
 configura_log()  # Giorno 9: le righe di log diventano JSON, con il request_id
+logger = logging.getLogger(__name__)
 ID_VALIDO = re.compile(r"[A-Za-z0-9-]{8,64}")  # dal Giorno 2: la forma di un id che si riusa
 
 
@@ -27,7 +35,21 @@ class HealthResponse(BaseModel):
     version: str
 
 
+class ReadyResponse(BaseModel):
+    status: Literal["ready", "not_ready"]
+    checks: dict[str, str]  # una parola per dipendenza: il perché sta nel log
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    yield
+    # Giorno 10, lo spegnimento: arriva qui dopo che le richieste in corso sono finite
+    await chiudi_redis()
+    await engine.dispose()  # le connessioni si chiudono, invece di scadere lato Postgres
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.app_name,
     version="1.0.0",
     description="Bootcamp Python AI Powered v1 — Lipari Consulting",
@@ -108,6 +130,42 @@ async def health() -> HealthResponse:
         timestamp=datetime.now(UTC).isoformat(),
         app_name=settings.app_name,
         version="1.0.0",
+    )
+
+
+async def _database() -> str:
+    try:
+        # due secondi di tetto: sotto il timeout di chi interroga la sonda
+        async with asyncio.timeout(2), engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("readiness_database_ko")  # host, porta e causa: qui, non fuori
+        return "ko"
+    return "ok"
+
+
+async def _cache() -> str:
+    if (redis := get_redis()) is None:
+        return "spenta"
+    try:
+        async with asyncio.timeout(1):
+            await redis.ping()
+    except Exception:
+        logger.warning("readiness_cache_ko")
+        return "ko"
+    return "ok"
+
+
+@app.get("/ready", response_model=ReadyResponse)
+async def ready(response: Response) -> ReadyResponse:
+    """Giorno 10: può servire traffico? 503 se no. La cache compare, ma non decide."""
+    database, cache = await asyncio.gather(_database(), _cache())
+    # senza database non si lavora; senza cache si lavora più lentamente e si paga di più
+    pronto = database == "ok"
+    if not pronto:
+        response.status_code = 503
+    return ReadyResponse(
+        status="ready" if pronto else "not_ready", checks={"database": database, "cache": cache}
     )
 
 
