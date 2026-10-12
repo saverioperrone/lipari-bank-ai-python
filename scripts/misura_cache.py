@@ -17,6 +17,7 @@ import statistics
 import time
 from pathlib import Path
 
+import fakeredis
 from pydantic import BaseModel
 
 from src.llm.client import LLMProvider
@@ -86,17 +87,20 @@ class MisuraCache(BaseModel):
 
 async def main() -> None:
     modello = ProviderContato(build_llm_provider(temperature=0))
-    deposito: dict[str, str] = {}
-    v2 = QueryRewriter(modello, load_prompt("rewrite_system_v2"), cache=deposito)
+    # dal Giorno 10 il deposito condiviso è Redis: qui uno in memoria, lo stesso per i due prompt
+    deposito = fakeredis.FakeServer()
+    v2 = QueryRewriter(
+        modello, load_prompt("rewrite_system_v2"), cache=fakeredis.FakeAsyncRedis(server=deposito)
+    )
 
     righe: list[Richiesta] = []
     salvate_grezze: set[str] = set()  # le domande esatte la cui riscrittura e' in cache
     for q in sequenza():
-        hit = v2.in_cache(q)
         hit_grezzo = q in salvate_grezze
         inizio = time.perf_counter()
-        riscritta = await v2.rewrite_cached(q)
+        riscrittura = await v2.riscrivi_per_ricerca(q)
         ms = (time.perf_counter() - inizio) * 1000
+        riscritta, hit = riscrittura.testo, riscrittura.da_cache
         if riscritta != q:
             salvate_grezze.add(q)
         righe.append(
@@ -104,7 +108,9 @@ async def main() -> None:
         )
 
     chiamate_prima = modello.chiamate
-    v1 = QueryRewriter(modello, load_prompt("rewrite_system_v1"), cache=deposito)
+    v1 = QueryRewriter(
+        modello, load_prompt("rewrite_system_v1"), cache=fakeredis.FakeAsyncRedis(server=deposito)
+    )
     await v1.rewrite_cached(DOMANDE_ELLITTICHE[2])
     prompt_cambiato_torna = modello.chiamate == chiamate_prima + 1
 

@@ -23,8 +23,7 @@ from pydantic import BaseModel
 
 from src.db.session import AsyncSessionLocal
 from src.lib.dedup import senza_ripetizioni
-from src.llm.embedding_client import EmbeddingClient
-from src.llm.factory import build_llm_provider
+from src.llm.factory import build_llm_provider, get_embedder
 from src.llm.prompt import load_prompt
 from src.llm.rewriter import QueryRewriter
 from src.services.retrieval_service import SOGLIA_PREDEFINITA, RetrievalService
@@ -144,7 +143,7 @@ async def main() -> None:
         else None
     )
 
-    embedder = EmbeddingClient()
+    embedder = get_embedder()  # dal Giorno 10 il client lo passa la factory
     esiti: list[Esito] = []
 
     async with AsyncSessionLocal() as session:

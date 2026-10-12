@@ -7,6 +7,7 @@ from slowapi import Limiter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.deps import UserContext, get_current_user, require_role
+from src.cache import get_redis
 from src.config import settings
 from src.db.models import EMBEDDING_DIM
 from src.db.repos import ChatRepository
@@ -29,13 +30,22 @@ PROMPT = load_prompt("advisor_system_v2")
 
 # La chiave e' l'utente del token, non l'IP: in filiale trenta operatori escono dallo
 # stesso NAT. `request.state.username` lo scrive get_current_user.
-limiter = Limiter(key_func=lambda request: request.state.username)
+# Giorno 10: con Redis i contatori sono uno per tutti i worker. Se Redis non risponde, si
+# ripiega sulla memoria del processo: un limite meno preciso per qualche minuto, non un 500
+limiter = Limiter(
+    key_func=lambda request: request.state.username,
+    storage_uri=settings.redis_url or "memory://",
+    in_memory_fallback_enabled=True,
+)
 
-riscrittore = QueryRewriter(build_llm_provider(temperature=0), load_prompt("rewrite_system_v2"))
+riscrittore = QueryRewriter(
+    build_llm_provider(temperature=0), load_prompt("rewrite_system_v2"), cache=get_redis()
+)
 
 
 def get_rewriter() -> QueryRewriter:
-    return riscrittore  # istanza unica: la cache delle riscritture vive con il processo
+    # istanza unica: senza Redis la cache delle riscritture vive con il processo
+    return riscrittore
 
 
 @dataclass
@@ -66,7 +76,7 @@ async def advice(
     # il tetto della chat vale anche qui: ogni chiamata al modello spende, non solo la chat
     await CostTracker(ChatRepository(session), settings.daily_budget_eur).verifica()
     risposta = await deps.rag.advise(req.question, user)
-    # Giorno 9: la generazione nel registro. La riscrittura qui non c'è: vedi il Code Blueprint
+    # Giorno 9: la generazione nel registro; dal Giorno 10 anche la riscrittura, nel costo
     CostLedger(session).aggiungi(
         endpoint="advice",
         username=user.username,

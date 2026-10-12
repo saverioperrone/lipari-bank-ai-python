@@ -4,6 +4,8 @@ Le varianti di scrittura della stessa domanda sono una riscrittura sola, e un pr
 nuovo non riceve le riscritture del vecchio, nemmeno quando il deposito e' lo stesso.
 """
 
+import fakeredis
+
 from src.llm.rewriter import QueryRewriter
 from src.llm.types import LLMResponse, Message
 
@@ -19,13 +21,15 @@ class ModelloContato:
 
 
 async def test_la_chiave_unisce_le_varianti_e_cambia_con_il_prompt() -> None:
-    deposito: dict[str, str] = {}
+    # dal Giorno 10 il deposito condiviso è Redis: qui uno in memoria, lo stesso per i due prompt
+    deposito = fakeredis.FakeServer()
     modello = ModelloContato()
-    v1 = QueryRewriter(modello, "prompt v1", cache=deposito)
+    v1 = QueryRewriter(modello, "prompt v1", cache=fakeredis.FakeAsyncRedis(server=deposito))
     prima = await v1.rewrite_cached("ven ok?")
     assert await v1.rewrite_cached("  Ven  OK ") == prima  # la variante esce dalla cache
     assert modello.chiamate == 1
 
-    v2 = QueryRewriter(modello, "prompt v2", cache=deposito)  # stesso deposito, prompt nuovo
+    # stesso deposito, prompt nuovo
+    v2 = QueryRewriter(modello, "prompt v2", cache=fakeredis.FakeAsyncRedis(server=deposito))
     await v2.rewrite_cached("ven ok?")
     assert modello.chiamate == 2  # la riscrittura del v1 non viene servita al v2

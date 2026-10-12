@@ -5,6 +5,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 
 from src.auth.deps import UserContext
 from src.exceptions import LLMProviderError
@@ -71,7 +72,7 @@ class Fasi:
     retrieval_ms: int = 0
     prompt_ms: int = 0
     llm_ms: int = 0
-    cache_hit: bool = False
+    cache_hit: bool = False  # Giorno 10: la riscrittura veniva dalla cache condivisa
     used_fallback: bool = False
 
     @property
@@ -126,8 +127,8 @@ class RAGService:
         fasi = Fasi()
 
         with _cronometro(fasi, "rewrite_ms"):
-            fasi.cache_hit = self.rewriter.in_cache(question)
-            search_query = await self.rewriter.rewrite_cached(question)
+            riscrittura = await self.rewriter.riscrivi_per_ricerca(question)
+        search_query, fasi.cache_hit = riscrittura.testo, riscrittura.da_cache
 
         with _cronometro(fasi, "embedding_ms"):
             query_vec = await self.embedder.embed_one(search_query)
@@ -171,8 +172,10 @@ class RAGService:
         return AdviceResponse(
             answer=risposta.content,
             citations=citate(risposta.content, chunks),
-            tokens_used=risposta.tokens_used,
-            cost_eur=risposta.cost_eur,
+            # Giorno 10: nel costo anche la riscrittura, che fino a ieri non si vedeva
+            tokens_used=risposta.tokens_used + riscrittura.tokens,
+            # la generazione qui ha il costo in float: passa da str, come nel registro
+            cost_eur=float(Decimal(str(risposta.cost_eur)) + riscrittura.cost_eur),
             rewritten_query=search_query,
         )
 

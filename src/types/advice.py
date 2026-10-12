@@ -28,7 +28,7 @@ class AdviceResponse(BaseModel):
     answer: str
     citations: list[Citation]
     tokens_used: int
-    cost_eur: float
+    cost_eur: float  # dal Giorno 10: la generazione e la riscrittura
     rewritten_query: str
 
 

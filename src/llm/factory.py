@@ -3,11 +3,13 @@ from functools import cache
 import instructor
 from openai import AsyncOpenAI
 
+from src.cache import get_redis
 from src.config import settings
 from src.exceptions import AppError
 from src.llm.anthropic_provider import AnthropicProvider
 from src.llm.client import LLMProvider
 from src.llm.embedding_client import EmbeddingClient
+from src.llm.embeddings import CachedEmbedder
 from src.llm.ollama_provider import OllamaProvider
 from src.llm.openai_provider import OpenAIProvider
 
@@ -32,11 +34,17 @@ def get_llm_provider() -> LLMProvider:
     return build_llm_provider()
 
 
-embedding_client = EmbeddingClient()
+@cache  # un client per processo, come _openai() nella factory del Giorno 4
+def _ollama() -> AsyncOpenAI:
+    """Il client degli embedding: qui sono sempre di Ollama, che non chiede una chiave."""
+    return AsyncOpenAI(api_key="ollama", base_url=settings.ollama_base_url)
 
 
 def get_embedder() -> EmbeddingClient:
-    return embedding_client  # istanza unica di applicazione
+    # lo stesso modello per i documenti e per le domande: è la regola che non si viola
+    base = EmbeddingClient(_ollama(), settings.embedding_model)
+    redis = get_redis()  # Giorno 10: con Redis, la cache davanti; senza, il client com'era
+    return CachedEmbedder(base, redis) if redis is not None else base
 
 
 def _client_dell_agente() -> AsyncOpenAI | None:

@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,6 +27,16 @@ class Settings(BaseSettings):
     jwt_secret: str
     soglia_approvazione_eur: Decimal = Decimal("5000")  # sopra, decide una persona
     soglia_doppia_firma_eur: Decimal = Decimal("50000")  # estensione: sopra, firmano in due
+    # Giorno 10: vuota vuol dire «niente Redis» — le cache restano nel processo, come in sviluppo
+    redis_url: str = ""
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _non_il_segnaposto(cls, v: str) -> str:
+        # Giorno 10: il valore d'esempio è lungo abbastanza, ma è scritto nel repository
+        if v.startswith("cambiami"):
+            raise ValueError("è il valore d'esempio di .env.example, generane uno tuo")
+        return v
 
 
 settings = Settings()  # raise at import if missing required
