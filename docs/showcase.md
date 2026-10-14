@@ -51,9 +51,12 @@ docker compose exec api printenv ADVICE_MODEL      # vuoto = spenta; llama3.2:1b
 2. Spegni la leva, e controlla con `printenv` che sia vuota.
 3. Prepara il terminale: incolla il blocco qui sotto. Prende i token di Marco, Giulia e Lucia e
    definisce i comandi della demo. Un token dura 30 minuti: incollalo non più di mezz'ora prima.
-4. Fai il riscaldamento, cioè la prima domanda della demo, una volta:
-   `chiedi "$MARCO" "Quali controlli servono per un bonifico verso il Venezuela?"`.
-5. Apri questo file al diagramma a quattro riquadri.
+4. Apri questo file al diagramma a quattro riquadri.
+5. Per ultimo, subito prima di cominciare, fai il riscaldamento, cioè la prima domanda della demo,
+   una volta: `chiedi "$MARCO" "Quali controlli servono per un bonifico verso il Venezuela?"`.
+   Ollama tiene il modello in memoria cinque minuti dopo l'ultima domanda (è il valore di default,
+   e il compose non lo cambia), e la demo comincia al minuto 2: se il riscaldamento è fatto troppo
+   presto, la prima risposta della demo torna a freddo.
 
 ```bash
 B=http://localhost:8000
